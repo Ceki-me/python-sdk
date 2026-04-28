@@ -80,6 +80,38 @@ Create secrets via dashboard: **API Keys & Secrets** section.
 | `HumanActionDeclined` | Browser owner declined the action |
 | `HumanActionTimeout` | Browser owner didn't respond in time |
 
+## Chat
+
+During a browser session, your agent can exchange messages with the browser provider via `session.chat`. The chat channel opens automatically when the session starts.
+
+```python
+from ceki_browser import Browser
+
+async def main():
+    async with Browser(token="YOUR_TOKEN") as br:
+        session = await br.session(mode="incognito", domain_hints=["example.com"])
+
+        # Listen for incoming messages from the provider
+        def on_provider_message(msg):
+            print(f"Provider says: {msg.content}")
+            if "captcha" in msg.content.lower():
+                # Take a screenshot and send it to the provider
+                asyncio.create_task(handle_captcha(session))
+
+        session.chat.on_message(on_provider_message)
+
+        # Send a message
+        await session.chat.send("Starting automation, please don't close the browser")
+
+        # Send a screenshot
+        await session.chat.send_image(Path("screenshot.png"))
+
+        # Fetch message history
+        history = await session.chat.history(limit=20)
+
+        await session.close()
+```
+
 ## Examples
 
 - [`quickstart.py`](examples/quickstart.py) — minimal 5-line example

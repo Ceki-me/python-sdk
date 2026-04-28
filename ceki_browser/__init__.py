@@ -10,11 +10,13 @@ from .errors import (
     ProviderNotVerified,
     RateLimited,
 )
+from .chat import ChatAPI
 from .session import Session
-from .types import HtmlResult, HumanActionResult, NavigateResult, QueryResult, ScreenshotResult
+from .types import ChatMessage, HtmlResult, HumanActionResult, NavigateResult, QueryResult, ScreenshotResult, TypingEvent
 
 __all__ = [
     "Browser",
+    "ChatAPI",
     "Session",
     "AuthError",
     "CekiBrowserError",
@@ -25,11 +27,13 @@ __all__ = [
     "ProviderDisconnected",
     "ProviderNotVerified",
     "RateLimited",
+    "ChatMessage",
     "HtmlResult",
     "HumanActionResult",
     "NavigateResult",
     "QueryResult",
     "ScreenshotResult",
+    "TypingEvent",
 ]
 
 __version__ = "0.1.0"

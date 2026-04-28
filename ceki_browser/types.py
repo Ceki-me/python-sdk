@@ -56,6 +56,37 @@ class HumanActionResult:
     request_id: str = ""
 
 
+@dataclass
+class ChatMessage:
+    _id: str = ""
+    topic_id: str = ""
+    author_id: int = 0
+    author_name: str = ""
+    type: str = "text"
+    content: str = ""
+    media: dict[str, Any] | None = None
+    created_at: str = ""
+
+
+@dataclass
+class TypingEvent:
+    user_id: int = 0
+    is_typing: bool = False
+
+
+def parse_chat_message(data: dict[str, Any]) -> ChatMessage:
+    return ChatMessage(
+        _id=str(data.get("_id", data.get("message_id", data.get("id", "")))),
+        topic_id=str(data.get("topic_id", "")),
+        author_id=int(data.get("author_id", data.get("user_id", 0))),
+        author_name=str(data.get("author_name", "")),
+        type=str(data.get("type", "text")),
+        content=str(data.get("content", "")),
+        media=data.get("media"),
+        created_at=str(data.get("created_at", "")),
+    )
+
+
 def parse_result(data: Any, cls: type) -> Any:
     if data is None:
         return cls()

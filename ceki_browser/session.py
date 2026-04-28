@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from .chat import ChatAPI
 from .errors import CekiBrowserError
 from .transport import Transport
 from .types import (
@@ -27,6 +28,7 @@ class Session:
         self._session_id: str | None = None
         self._mode = mode
         self._active = False
+        self._chat: ChatAPI | None = None
 
     @property
     def session_id(self) -> str | None:
@@ -35,6 +37,16 @@ class Session:
     @property
     def active(self) -> bool:
         return self._active
+
+    @property
+    def chat(self) -> ChatAPI:
+        if self._chat is None:
+            self._chat = ChatAPI(
+                self._transport,
+                self._session_id or self._request_id,
+                None,
+            )
+        return self._chat
 
     async def _wait_for_active(self, timeout: float = 60.0) -> None:
         ready = asyncio.Event()
@@ -71,6 +83,13 @@ class Session:
         if session_id_holder:
             self._session_id = session_id_holder[0]
         self._active = True
+
+        self._chat = ChatAPI(
+            self._transport,
+            self._session_id or self._request_id,
+            None,
+        )
+        self._install_chat_event_handler()
 
     async def navigate(self, url: str, timeout_ms: int = 120000) -> NavigateResult:
         self._check_active()
@@ -191,6 +210,26 @@ class Session:
             )
         except CekiBrowserError:
             pass
+
+    def _install_chat_event_handler(self) -> None:
+        original_cb = self._transport._event_callback
+
+        async def _on_event(method: str, params: dict[str, Any]) -> None:
+            if method == "chat.topic_created" and self._chat:
+                topic_id = params.get("chat_topic_id", "")
+                if topic_id:
+                    self._chat._set_topic_id(topic_id)
+            elif method == "chat.message" and self._chat:
+                self._chat._dispatch_message(params)
+            elif method == "chat.typing" and self._chat:
+                self._chat._dispatch_typing(params)
+
+            if original_cb:
+                result = original_cb(method, params)
+                if asyncio.iscoroutine(result):
+                    await result
+
+        self._transport.on_event(_on_event)
 
     def _check_active(self) -> None:
         if not self._active:
