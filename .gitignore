@@ -14,3 +14,4 @@ venv/
 *.so
 .coverage
 htmlcov/
+examples/*.log
