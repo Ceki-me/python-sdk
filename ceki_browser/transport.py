@@ -52,7 +52,7 @@ class Transport:
     async def connect(self) -> dict[str, Any]:
         headers = {"Authorization": f"Bearer {self._token}"}
         try:
-            self._ws = await websockets.connect(self._relay_url, additional_headers=headers)
+            self._ws = await websockets.connect(self._relay_url, extra_headers=headers)
         except Exception as e:
             raise AuthError(f"Failed to connect to relay: {e}", code=401) from e
 

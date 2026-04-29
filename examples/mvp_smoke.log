@@ -1,0 +1,40 @@
+2026-04-29 10:03:23,573 DEBUG asyncio: Using selector: EpollSelector
+2026-04-29 10:03:23,573 INFO mvp_smoke: ============================================================
+2026-04-29 10:03:23,573 INFO mvp_smoke: MVP SMOKE TEST START
+2026-04-29 10:03:23,573 INFO mvp_smoke: relay: wss://browser.ittribe.org/ws/agent
+2026-04-29 10:03:23,573 INFO mvp_smoke: ============================================================
+2026-04-29 10:03:23,685 DEBUG websockets.client: = connection is CONNECTING
+2026-04-29 10:03:23,739 DEBUG websockets.client: > GET /ws/agent HTTP/1.1
+2026-04-29 10:03:23,739 DEBUG websockets.client: > Host: browser.ittribe.org
+2026-04-29 10:03:23,739 DEBUG websockets.client: > Upgrade: websocket
+2026-04-29 10:03:23,739 DEBUG websockets.client: > Connection: Upgrade
+2026-04-29 10:03:23,739 DEBUG websockets.client: > Sec-WebSocket-Key: Gu3mNiweTqfr90yC83bT/Q==
+2026-04-29 10:03:23,739 DEBUG websockets.client: > Sec-WebSocket-Version: 13
+2026-04-29 10:03:23,739 DEBUG websockets.client: > Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+2026-04-29 10:03:23,739 DEBUG websockets.client: > Authorization: Bearer ***REDACTED***
+2026-04-29 10:03:23,739 DEBUG websockets.client: > User-Agent: Python/3.12 websockets/13.1
+2026-04-29 10:03:24,084 DEBUG websockets.client: < HTTP/1.1 101 Switching Protocols
+2026-04-29 10:03:24,084 DEBUG websockets.client: < Server: nginx
+2026-04-29 10:03:24,084 DEBUG websockets.client: < Date: Wed, 29 Apr 2026 10:03:24 GMT
+2026-04-29 10:03:24,084 DEBUG websockets.client: < Connection: upgrade
+2026-04-29 10:03:24,085 DEBUG websockets.client: < Upgrade: websocket
+2026-04-29 10:03:24,085 DEBUG websockets.client: < Sec-WebSocket-Accept: Uqa9hcKJr6C4Uki5i96z8m+PO7Y=
+2026-04-29 10:03:24,085 DEBUG websockets.client: < X-Frame-Options: DENY
+2026-04-29 10:03:24,085 DEBUG websockets.client: < X-Content-Type-Options: nosniff
+2026-04-29 10:03:24,085 DEBUG websockets.client: < Strict-Transport-Security: max-age=31536000; includeSubDomains
+2026-04-29 10:03:24,085 DEBUG websockets.client: < Content-Security-Policy: frame-ancestors 'self'
+2026-04-29 10:03:24,085 DEBUG websockets.client: = connection is OPEN
+2026-04-29 10:03:24,092 DEBUG websockets.client: < TEXT '{"jsonrpc":"2.0","result":{"status":"connected"..._per_min":100}},"id":0}' [204 bytes]
+2026-04-29 10:03:24,092 INFO mvp_smoke: PASS  connect — agent_id=a20d2b11-54e2-4191-9948-3efe9dbac8c5
+2026-04-29 10:03:24,092 INFO mvp_smoke: Requesting incognito session... (waiting for provider, timeout=120s)
+2026-04-29 10:03:24,092 DEBUG websockets.client: > TEXT '{"jsonrpc": "2.0", "method": "session.request",...ated_duration_min": 5}}' [144 bytes]
+2026-04-29 10:03:24,101 DEBUG websockets.client: < TEXT '{"jsonrpc":"2.0","method":"session.no_match","p... providers available"}}' [151 bytes]
+2026-04-29 10:03:24,104 DEBUG websockets.client: < TEXT '{"jsonrpc":"2.0","result":{"status":"matching",...-bd032d8e4a8b"},"id":1}' [107 bytes]
+2026-04-29 10:03:34,103 DEBUG websockets.client: > TEXT '{"jsonrpc": "2.0", "method": "heartbeat", "id": 2}' [50 bytes]
+2026-04-29 10:03:34,105 DEBUG websockets.client: < TEXT '{"jsonrpc":"2.0","result":{"status":"pong"},"id":2}' [51 bytes]
+2026-04-29 10:03:44,095 DEBUG websockets.client: % sending keepalive ping
+2026-04-29 10:03:44,095 DEBUG websockets.client: > PING 21 a6 0a 21 [binary, 4 bytes]
+2026-04-29 10:03:44,097 DEBUG websockets.client: < PONG 21 a6 0a 21 [binary, 4 bytes]
+2026-04-29 10:03:44,097 DEBUG websockets.client: % received keepalive pong
+2026-04-29 10:03:44,108 DEBUG websockets.client: > TEXT '{"jsonrpc": "2.0", "method": "heartbeat", "id": 3}' [50 bytes]
+2026-04-29 10:03:44,110 DEBUG websockets.client: < TEXT '{"jsonrpc":"2.0","result":{"status":"pong"},"id":3}' [51 bytes]
