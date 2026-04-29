@@ -9,7 +9,7 @@ Requires:
 
 Environment variables:
   CEKI_TOKEN        — agent Sanctum API token (required)
-  RELAY_URL         — relay WebSocket URL (default: wss://browser.ittribe.org/ws/agent)
+  RELAY_URL         — relay WebSocket URL (required)
 
 Usage:
   export CEKI_TOKEN="123|abcdef..."
@@ -35,7 +35,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("mvp_smoke")
 
-RELAY_URL = os.environ.get("RELAY_URL", "wss://browser.ittribe.org/ws/agent")
+RELAY_URL = os.environ.get("RELAY_URL", "")
 TOKEN = os.environ.get("CEKI_TOKEN", "")
 
 STEPS_PASSED: list[str] = []
@@ -57,6 +57,9 @@ def step_fail(name: str, detail: str = ""):
 async def main() -> int:
     if not TOKEN:
         log.error("CEKI_TOKEN env var is required")
+        return 1
+    if not RELAY_URL:
+        log.error("RELAY_URL env var is required")
         return 1
 
     log.info("=" * 60)
