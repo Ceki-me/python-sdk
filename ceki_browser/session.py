@@ -48,12 +48,13 @@ class Session:
             )
         return self._chat
 
-    async def _wait_for_active(self, timeout: float = 60.0) -> None:
+    def _install_match_listener(self) -> tuple[asyncio.Event, list[str], list[Exception]]:
         ready = asyncio.Event()
         session_id_holder: list[str] = []
         error_holder: list[Exception] = []
 
         original_cb = self._transport._event_callback
+        self._original_cb_for_match = original_cb
 
         async def _on_event(method: str, params: dict[str, Any]) -> None:
             if method == "session.matched":
@@ -74,12 +75,16 @@ class Session:
                     await result
 
         self._transport.on_event(_on_event)
+        return ready, session_id_holder, error_holder
+
+    async def _wait_for_active(self, timeout: float = 60.0) -> None:
+        ready, session_id_holder, error_holder = self._match_state
         try:
             await asyncio.wait_for(ready.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             raise CekiBrowserError("Timed out waiting for session to become active")
         finally:
-            self._transport.on_event(original_cb)
+            self._transport.on_event(self._original_cb_for_match)
 
         if error_holder:
             raise error_holder[0]

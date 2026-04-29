@@ -57,10 +57,13 @@ class Browser:
         if language:
             params["language"] = language
 
+        sess = Session(self._transport, "", mode)
+        sess._match_state = sess._install_match_listener()
+
         result = await self._transport.send("session.request", params, timeout=30)
         request_id = result.get("request_id", "") if isinstance(result, dict) else ""
+        sess._request_id = request_id
 
-        sess = Session(self._transport, request_id, mode)
         await sess._wait_for_active(timeout=wait_timeout)
         return sess
 
