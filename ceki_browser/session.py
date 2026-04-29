@@ -4,7 +4,7 @@ import asyncio
 from typing import Any
 
 from .chat import ChatAPI
-from .errors import CekiBrowserError
+from .errors import CekiBrowserError, NoMatchError, SessionEndedError
 from .transport import Transport
 from .types import (
     HtmlResult,
@@ -51,21 +51,22 @@ class Session:
     async def _wait_for_active(self, timeout: float = 60.0) -> None:
         ready = asyncio.Event()
         session_id_holder: list[str] = []
+        error_holder: list[Exception] = []
 
         original_cb = self._transport._event_callback
 
         async def _on_event(method: str, params: dict[str, Any]) -> None:
-            if method == "session.state_changed":
-                state = params.get("state")
-                sid = params.get("session_id", params.get("request_id", ""))
-                if state == "ACTIVE":
-                    session_id_holder.append(sid)
-                    ready.set()
-                elif state in ("ENDED", "ENDING"):
-                    ready.set()
-            if method == "session.started":
+            if method == "session.matched":
                 sid = params.get("session_id", "")
                 session_id_holder.append(sid)
+                ready.set()
+            elif method == "session.no_match":
+                reason = params.get("reason", "No matching providers available")
+                error_holder.append(NoMatchError(reason))
+                ready.set()
+            elif method == "session.ended":
+                reason = params.get("reason", "ended_before_active")
+                error_holder.append(SessionEndedError(reason))
                 ready.set()
             if original_cb:
                 result = original_cb(method, params)
@@ -79,6 +80,9 @@ class Session:
             raise CekiBrowserError("Timed out waiting for session to become active")
         finally:
             self._transport.on_event(original_cb)
+
+        if error_holder:
+            raise error_holder[0]
 
         if session_id_holder:
             self._session_id = session_id_holder[0]

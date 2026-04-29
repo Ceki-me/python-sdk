@@ -36,6 +36,14 @@ class HumanActionTimeout(CekiBrowserError):
     pass
 
 
+class NoMatchError(CekiBrowserError):
+    pass
+
+
+class SessionEndedError(CekiBrowserError):
+    pass
+
+
 ERROR_CODE_MAP: dict[int, type[CekiBrowserError]] = {
     -1010: ProviderDisconnected,
     -1013: RateLimited,

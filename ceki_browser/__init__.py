@@ -6,9 +6,11 @@ from .errors import (
     HumanActionDeclined,
     HumanActionTimeout,
     NavigationTimeout,
+    NoMatchError,
     ProviderDisconnected,
     ProviderNotVerified,
     RateLimited,
+    SessionEndedError,
 )
 from .chat import ChatAPI
 from .session import Session
@@ -26,7 +28,9 @@ __all__ = [
     "NavigationTimeout",
     "ProviderDisconnected",
     "ProviderNotVerified",
+    "NoMatchError",
     "RateLimited",
+    "SessionEndedError",
     "ChatMessage",
     "HtmlResult",
     "HumanActionResult",
