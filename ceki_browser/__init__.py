@@ -12,14 +12,25 @@ from .errors import (
     RateLimited,
     SessionEndedError,
 )
-from .chat import ChatAPI
-from .session import Session
-from .types import ChatMessage, HtmlResult, HumanActionResult, NavigateResult, QueryResult, ScreenshotResult, TypingEvent
+from .session import ChatAPI, Session
+from .transport_rtc import ChatImage, ChatTextMessage, RTCTransport
+from .types import (
+    ChatMessage,
+    HtmlResult,
+    HumanActionResult,
+    NavigateResult,
+    QueryResult,
+    ScreenshotResult,
+    TypingEvent,
+)
 
 __all__ = [
     "Browser",
     "ChatAPI",
     "Session",
+    "RTCTransport",
+    "ChatImage",
+    "ChatTextMessage",
     "AuthError",
     "CekiBrowserError",
     "CommandTimeout",
@@ -40,4 +51,4 @@ __all__ = [
     "TypingEvent",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

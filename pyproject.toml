@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ceki-browser"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python SDK for browser.ceki.me — rent real browsers of real people"
 readme = "README.md"
 license = {text = "MIT"}
@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "websockets>=12.0,<14.0",
+    "aiortc>=1.6.0",
 ]
 
 [project.optional-dependencies]

@@ -1,212 +1,143 @@
-import asyncio
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+import time
 
 import pytest
 
-from ceki_browser.chat import ChatAPI
-from ceki_browser.transport import Transport
-from ceki_browser.types import ChatMessage, TypingEvent
+from ceki_browser.session import ChatAPI
+from ceki_browser.transport_rtc import ChatImage, ChatTextMessage
 
 
-class FakeWebSocket:
-    def __init__(self, messages: list[str] | None = None):
-        self._messages = list(messages or [])
+class MockDataChannel:
+    def __init__(self, label: str):
+        self.label = label
+        self.readyState = "open"
         self._sent: list[str] = []
-        self._closed = False
-        self.state = MagicMock()
-        self.state.name = "OPEN"
+        self._handlers: dict[str, list] = {}
 
-    async def recv(self) -> str:
-        if self._messages:
-            return self._messages.pop(0)
-        await asyncio.sleep(100)
-        return ""
-
-    async def send(self, data: str) -> None:
+    def send(self, data: str) -> None:
         self._sent.append(data)
 
-    async def close(self) -> None:
-        self._closed = True
+    def on(self, event: str):
+        def decorator(fn):
+            self._handlers.setdefault(event, []).append(fn)
+            return fn
+        return decorator
 
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self) -> str:
-        if self._messages:
-            return self._messages.pop(0)
-        if self._closed:
-            raise StopAsyncIteration
-        await asyncio.sleep(100)
-        raise StopAsyncIteration
+    def emit(self, event: str, *args):
+        for h in self._handlers.get(event, []):
+            h(*args)
 
 
-WELCOME = json.dumps({"jsonrpc": "2.0", "result": {"status": "connected", "agent_id": "a-1"}, "id": 0})
+class MockRTC:
+    def __init__(self):
+        self.cmd_channel = MockDataChannel("ceki-cmd")
+        self.chat_channel = MockDataChannel("ceki-chat")
+        self._chat_text_handlers: list = []
+        self._chat_image_handlers: list = []
+        self._chat_history: list = []
+        self._sent_texts: list[str] = []
+        self._sent_images: list[tuple] = []
 
+    async def send_chat_text(self, text: str):
+        self._sent_texts.append(text)
+        msg = ChatTextMessage(id=f"msg-{len(self._sent_texts)}", from_="agent", ts=int(time.time() * 1000), text=text)
+        self._chat_history.append(msg)
 
-@pytest.fixture
-def transport_and_ws():
-    send_resp = json.dumps({
-        "jsonrpc": "2.0",
-        "result": {"message_id": "msg-001", "created_at": "2026-04-28T12:00:00Z", "persisted": True},
-        "id": 1,
-    })
-    ws = FakeWebSocket([WELCOME, send_resp])
-    return ws
+    async def send_chat_image(self, data, mime=None):
+        self._sent_images.append((data, mime))
 
+    def on_chat_message(self, cb):
+        self._chat_text_handlers.append(cb)
 
-@pytest.mark.asyncio
-async def test_chat_send(transport_and_ws):
-    ws = transport_and_ws
-    with patch("ceki_browser.transport.websockets.connect", new_callable=AsyncMock, return_value=ws):
-        t = Transport(token="tok", relay_url="wss://test/ws/agent")
-        await t.connect()
+    def on_chat_image(self, cb):
+        self._chat_image_handlers.append(cb)
 
-        chat = ChatAPI(t, "sess-1", "topic-1")
-        msg = await chat.send("hello")
+    @property
+    def chat_history(self):
+        return list(self._chat_history)
 
-        assert msg._id == "msg-001"
-        assert msg.content == "hello"
-        assert msg.type == "text"
+    def _dispatch_text(self, msg: ChatTextMessage):
+        self._chat_history.append(msg)
+        for h in self._chat_text_handlers:
+            h(msg)
 
-        sent = json.loads(ws._sent[0])
-        assert sent["method"] == "chat.send"
-        assert sent["params"]["session_id"] == "sess-1"
-        assert sent["params"]["content"] == "hello"
-        assert sent["params"]["type"] == "text"
-        await t.close()
-
-
-@pytest.mark.asyncio
-async def test_chat_send_image(transport_and_ws):
-    ws = transport_and_ws
-    with patch("ceki_browser.transport.websockets.connect", new_callable=AsyncMock, return_value=ws):
-        t = Transport(token="tok", relay_url="wss://test/ws/agent")
-        await t.connect()
-
-        chat = ChatAPI(t, "sess-1", "topic-1")
-        png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
-        msg = await chat.send_image(png_bytes, "image/png")
-
-        assert msg._id == "msg-001"
-        assert msg.type == "image"
-
-        sent = json.loads(ws._sent[0])
-        assert sent["params"]["type"] == "image"
-        assert "data" in sent["params"]["media"]
-        assert sent["params"]["media"]["mime"] == "image/png"
-        await t.close()
+    def _dispatch_image(self, img: ChatImage):
+        self._chat_history.append(img)
+        for h in self._chat_image_handlers:
+            h(img)
 
 
 @pytest.mark.asyncio
-async def test_chat_history():
-    history_resp = json.dumps({
-        "jsonrpc": "2.0",
-        "result": {
-            "messages": [
-                {"_id": "m1", "topic_id": "t1", "author_id": 1, "author_name": "Agent", "type": "text", "content": "hi", "created_at": "2026-04-28T11:00:00Z"},
-                {"_id": "m2", "topic_id": "t1", "author_id": 2, "author_name": "Provider", "type": "text", "content": "hello", "created_at": "2026-04-28T11:01:00Z"},
-            ],
-            "has_more": False,
-            "next_cursor": None,
-        },
-        "id": 1,
-    })
-    ws = FakeWebSocket([WELCOME, history_resp])
-    with patch("ceki_browser.transport.websockets.connect", new_callable=AsyncMock, return_value=ws):
-        t = Transport(token="tok", relay_url="wss://test/ws/agent")
-        await t.connect()
+async def test_chat_send_text():
+    rtc = MockRTC()
+    chat = ChatAPI(rtc)
 
-        chat = ChatAPI(t, "sess-1", "topic-1")
-        messages = await chat.history()
-
-        assert len(messages) == 2
-        assert messages[0]._id == "m1"
-        assert messages[0].content == "hi"
-        assert messages[1].author_name == "Provider"
-        await t.close()
+    await chat.send("hello world")
+    assert rtc._sent_texts == ["hello world"]
+    assert len(rtc.chat_history) == 1
 
 
 @pytest.mark.asyncio
-async def test_chat_history_no_topic():
-    ws = FakeWebSocket([WELCOME])
-    with patch("ceki_browser.transport.websockets.connect", new_callable=AsyncMock, return_value=ws):
-        t = Transport(token="tok", relay_url="wss://test/ws/agent")
-        await t.connect()
+async def test_chat_send_image():
+    rtc = MockRTC()
+    chat = ChatAPI(rtc)
 
-        chat = ChatAPI(t, "sess-1", None)
-        messages = await chat.history()
-        assert messages == []
-        await t.close()
+    png = b"\x89PNG" + b"\x00" * 100
+    await chat.send_image(png, "image/png")
+    assert len(rtc._sent_images) == 1
+    assert rtc._sent_images[0][1] == "image/png"
 
 
 @pytest.mark.asyncio
-async def test_chat_on_message():
-    ws = FakeWebSocket([WELCOME])
-    with patch("ceki_browser.transport.websockets.connect", new_callable=AsyncMock, return_value=ws):
-        t = Transport(token="tok", relay_url="wss://test/ws/agent")
-        await t.connect()
+async def test_chat_on_message_callback():
+    rtc = MockRTC()
+    chat = ChatAPI(rtc)
 
-        chat = ChatAPI(t, "sess-1", "topic-1")
-        received: list[ChatMessage] = []
-        unsub = chat.on_message(received.append)
+    received: list[ChatTextMessage] = []
+    chat.on_message(received.append)
 
-        chat._dispatch_message({
-            "message": {
-                "_id": "m3",
-                "topic_id": "topic-1",
-                "author_id": 99,
-                "author_name": "Provider",
-                "type": "text",
-                "content": "captcha please",
-                "created_at": "2026-04-28T12:00:00Z",
-            }
-        })
+    msg = ChatTextMessage(id="m1", from_="provider", ts=1000, text="hi there")
+    rtc._dispatch_text(msg)
 
-        assert len(received) == 1
-        assert received[0].content == "captcha please"
-        assert received[0].author_id == 99
-
-        unsub()
-        chat._dispatch_message({"message": {"_id": "m4", "content": "ignored"}})
-        assert len(received) == 1
-        await t.close()
+    assert len(received) == 1
+    assert received[0].text == "hi there"
+    assert received[0].from_ == "provider"
 
 
 @pytest.mark.asyncio
-async def test_chat_on_typing():
-    ws = FakeWebSocket([WELCOME])
-    with patch("ceki_browser.transport.websockets.connect", new_callable=AsyncMock, return_value=ws):
-        t = Transport(token="tok", relay_url="wss://test/ws/agent")
-        await t.connect()
+async def test_chat_on_image_callback():
+    rtc = MockRTC()
+    chat = ChatAPI(rtc)
 
-        chat = ChatAPI(t, "sess-1", "topic-1")
-        events: list[TypingEvent] = []
-        unsub = chat.on_typing(events.append)
+    received: list[ChatImage] = []
+    chat.on_image(received.append)
 
-        chat._dispatch_typing({"user_id": 42, "is_typing": True})
+    img = ChatImage(id="i1", from_="provider", ts=1000, mime="image/png", data=b"\x89PNG")
+    rtc._dispatch_image(img)
 
-        assert len(events) == 1
-        assert events[0].user_id == 42
-        assert events[0].is_typing is True
-
-        unsub()
-        await t.close()
+    assert len(received) == 1
+    assert received[0].mime == "image/png"
 
 
 @pytest.mark.asyncio
-async def test_chat_typing_sends_notification():
-    ws = FakeWebSocket([WELCOME])
-    with patch("ceki_browser.transport.websockets.connect", new_callable=AsyncMock, return_value=ws):
-        t = Transport(token="tok", relay_url="wss://test/ws/agent")
-        await t.connect()
+async def test_chat_history_ephemeral():
+    rtc = MockRTC()
+    chat = ChatAPI(rtc)
 
-        chat = ChatAPI(t, "sess-1", "topic-1")
-        await chat.typing(True)
+    await chat.send("msg1")
+    await chat.send("msg2")
 
-        sent = json.loads(ws._sent[0])
-        assert sent["method"] == "chat.typing"
-        assert sent["params"]["is_typing"] is True
-        assert sent["params"]["session_id"] == "sess-1"
-        assert "id" not in sent
-        await t.close()
+    history = chat.history
+    assert len(history) == 2
+
+    rtc._chat_history.clear()
+    assert len(chat.history) == 0
+
+
+@pytest.mark.asyncio
+async def test_chat_available():
+    rtc = MockRTC()
+    chat = ChatAPI(rtc)
+    assert chat.available
+
+    rtc.chat_channel.readyState = "closed"
+    assert not chat.available

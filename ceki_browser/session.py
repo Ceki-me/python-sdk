@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+import logging
+from typing import Any, Callable
 
-from .chat import ChatAPI
 from .errors import CekiBrowserError, NoMatchError, SessionEndedError
 from .transport import Transport
+from .transport_rtc import ChatImage, ChatTextMessage, RTCTransport
 from .types import (
     HtmlResult,
     HumanActionResult,
@@ -15,6 +16,37 @@ from .types import (
     parse_result,
 )
 
+logger = logging.getLogger("ceki_browser")
+
+
+class ChatAPI:
+    def __init__(self, rtc: RTCTransport):
+        self._rtc = rtc
+
+    @property
+    def available(self) -> bool:
+        return self._rtc.chat_channel is not None and self._rtc.chat_channel.readyState == "open"
+
+    async def send(self, text: str) -> None:
+        await self._rtc.send_chat_text(text)
+
+    async def send_image(
+        self,
+        data: bytes | str,
+        mime: str | None = None,
+    ) -> None:
+        await self._rtc.send_chat_image(data, mime)
+
+    def on_message(self, callback: Callable[[ChatTextMessage], Any]) -> None:
+        self._rtc.on_chat_message(callback)
+
+    def on_image(self, callback: Callable[[ChatImage], Any]) -> None:
+        self._rtc.on_chat_image(callback)
+
+    @property
+    def history(self) -> list[ChatTextMessage | ChatImage]:
+        return self._rtc.chat_history
+
 
 class Session:
     def __init__(
@@ -22,13 +54,16 @@ class Session:
         transport: Transport,
         request_id: str,
         mode: str,
+        ice_servers: list[dict[str, Any]] | None = None,
     ):
         self._transport = transport
         self._request_id = request_id
         self._session_id: str | None = None
         self._mode = mode
         self._active = False
+        self._rtc: RTCTransport | None = None
         self._chat: ChatAPI | None = None
+        self._ice_servers = ice_servers or [{"urls": "stun:stun.l.google.com:19302"}]
 
     @property
     def session_id(self) -> str | None:
@@ -41,12 +76,12 @@ class Session:
     @property
     def chat(self) -> ChatAPI:
         if self._chat is None:
-            self._chat = ChatAPI(
-                self._transport,
-                self._session_id or self._request_id,
-                None,
-            )
+            raise CekiBrowserError("Chat not available until session is active with P2P connection")
         return self._chat
+
+    @property
+    def rtc(self) -> RTCTransport | None:
+        return self._rtc
 
     def _install_match_listener(self) -> tuple[asyncio.Event, list[str], list[Exception]]:
         ready = asyncio.Event()
@@ -93,16 +128,77 @@ class Session:
             self._session_id = session_id_holder[0]
         self._active = True
 
-        self._chat = ChatAPI(
-            self._transport,
-            self._session_id or self._request_id,
-            None,
-        )
-        self._install_chat_event_handler()
+        await self._setup_rtc()
+
+    async def _setup_rtc(self) -> None:
+        self._rtc = RTCTransport(self._ice_servers)
+        self._chat = ChatAPI(self._rtc)
+
+        signaling_done = asyncio.Event()
+        answer_holder: list[dict[str, Any]] = []
+
+        original_cb = self._transport._event_callback
+
+        async def _on_signaling(method: str, params: dict[str, Any]) -> None:
+            if method == "webrtc.answer":
+                answer_holder.append(params)
+                signaling_done.set()
+            elif method == "webrtc.ice":
+                await self._rtc.add_ice(params)
+            elif method == "session.ended":
+                self._active = False
+                signaling_done.set()
+            if original_cb:
+                result = original_cb(method, params)
+                if asyncio.iscoroutine(result):
+                    await result
+
+        self._rtc.on_signaling(lambda method, params: asyncio.ensure_future(
+            self._transport.notify(method, {
+                "session_id": self._session_id,
+                **(params or {}),
+            })
+        ))
+
+        self._transport.on_event(_on_signaling)
+
+        offer = await self._rtc.create_offer()
+        await self._transport.notify("webrtc.offer", {
+            "session_id": self._session_id,
+            "sdp": offer["sdp"],
+            "type": offer["type"],
+        })
+
+        try:
+            await asyncio.wait_for(signaling_done.wait(), timeout=30.0)
+        except asyncio.TimeoutError:
+            raise CekiBrowserError("Timed out waiting for WebRTC answer")
+
+        if not answer_holder:
+            raise CekiBrowserError("Session ended before RTC handshake completed")
+
+        await self._rtc.apply_answer(answer_holder[0])
+        await self._rtc.wait_connected(timeout=15.0)
+
+        self._install_session_event_handler()
+        logger.info("P2P connection established for session %s", self._session_id)
+
+    def _install_session_event_handler(self) -> None:
+        original_cb = self._transport._event_callback
+
+        async def _on_event(method: str, params: dict[str, Any]) -> None:
+            if method == "session.ended":
+                self._active = False
+            if original_cb:
+                result = original_cb(method, params)
+                if asyncio.iscoroutine(result):
+                    await result
+
+        self._transport.on_event(_on_event)
 
     async def navigate(self, url: str, timeout_ms: int = 120000) -> NavigateResult:
         self._check_active()
-        data = await self._transport.send(
+        data = await self._rtc.send_command(
             "browser.navigate",
             {"url": url, "timeout_ms": timeout_ms},
             timeout=timeout_ms / 1000 + 5,
@@ -114,7 +210,7 @@ class Session:
         params: dict[str, Any] = {"selector": selector}
         if attributes:
             params["attributes"] = attributes
-        data = await self._transport.send("browser.query", params)
+        data = await self._rtc.send_command("browser.query", params)
         return parse_result(data, QueryResult)
 
     async def query_all(self, selector: str, attributes: list[str] | None = None, limit: int = 20) -> QueryResult:
@@ -122,12 +218,12 @@ class Session:
         params: dict[str, Any] = {"selector": selector, "limit": limit}
         if attributes:
             params["attributes"] = attributes
-        data = await self._transport.send("browser.query_all", params)
+        data = await self._rtc.send_command("browser.query_all", params)
         return parse_result(data, QueryResult)
 
     async def get_html(self, selector: str = "html", outer: bool = True) -> HtmlResult:
         self._check_active()
-        data = await self._transport.send("browser.get_html", {"selector": selector, "outer": outer})
+        data = await self._rtc.send_command("browser.get_html", {"selector": selector, "outer": outer})
         return parse_result(data, HtmlResult)
 
     async def click(self, selector: str | None = None, x: int | None = None, y: int | None = None) -> None:
@@ -139,11 +235,11 @@ class Session:
             params["x"] = x
         if y is not None:
             params["y"] = y
-        await self._transport.send("browser.click", params)
+        await self._rtc.send_command("browser.click", params)
 
     async def type(self, selector: str, text: str, delay_ms: int = 0) -> None:
         self._check_active()
-        await self._transport.send("browser.type", {"selector": selector, "text": text, "delay_ms": delay_ms})
+        await self._rtc.send_command("browser.type", {"selector": selector, "text": text, "delay_ms": delay_ms})
 
     async def scroll(
         self,
@@ -158,32 +254,32 @@ class Session:
         else:
             params["direction"] = direction
             params["amount"] = amount
-        await self._transport.send("browser.scroll", params)
+        await self._rtc.send_command("browser.scroll", params)
 
     async def screenshot(self, format: str = "png", quality: int = 80) -> ScreenshotResult:
         self._check_active()
-        data = await self._transport.send("browser.screenshot", {"format": format, "quality": quality})
+        data = await self._rtc.send_command("browser.screenshot", {"format": format, "quality": quality})
         return parse_result(data, ScreenshotResult)
 
     async def back(self) -> NavigateResult:
         self._check_active()
-        data = await self._transport.send("browser.back")
+        data = await self._rtc.send_command("browser.back")
         return parse_result(data, NavigateResult)
 
     async def forward(self) -> NavigateResult:
         self._check_active()
-        data = await self._transport.send("browser.forward")
+        data = await self._rtc.send_command("browser.forward")
         return parse_result(data, NavigateResult)
 
     async def reload(self) -> NavigateResult:
         self._check_active()
-        data = await self._transport.send("browser.reload")
+        data = await self._rtc.send_command("browser.reload")
         return parse_result(data, NavigateResult)
 
     async def inject_credentials(self, secret_id: str, target: dict[str, str]) -> dict[str, Any]:
         self._check_active()
         params = {"secret_id": secret_id, **target}
-        data = await self._transport.send("browser.inject_credentials", params)
+        data = await self._rtc.send_command("browser.inject_credentials", params)
         return data if isinstance(data, dict) else {}
 
     async def request_human_action(
@@ -195,7 +291,7 @@ class Session:
         self._check_active()
         import uuid
 
-        data = await self._transport.send(
+        data = await self._rtc.send_command(
             "browser.request_human_action",
             {
                 "request_id": str(uuid.uuid4()),
@@ -219,30 +315,16 @@ class Session:
             )
         except CekiBrowserError:
             pass
-
-    def _install_chat_event_handler(self) -> None:
-        original_cb = self._transport._event_callback
-
-        async def _on_event(method: str, params: dict[str, Any]) -> None:
-            if method == "chat.topic_created" and self._chat:
-                topic_id = params.get("chat_topic_id", "")
-                if topic_id:
-                    self._chat._set_topic_id(topic_id)
-            elif method == "chat.message" and self._chat:
-                self._chat._dispatch_message(params)
-            elif method == "chat.typing" and self._chat:
-                self._chat._dispatch_typing(params)
-
-            if original_cb:
-                result = original_cb(method, params)
-                if asyncio.iscoroutine(result):
-                    await result
-
-        self._transport.on_event(_on_event)
+        if self._rtc:
+            await self._rtc.close()
+            self._rtc = None
+            self._chat = None
 
     def _check_active(self) -> None:
         if not self._active:
             raise CekiBrowserError("Session is not active")
+        if not self._rtc:
+            raise CekiBrowserError("P2P transport not established")
 
     async def __aenter__(self) -> Session:
         return self

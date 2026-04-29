@@ -1,7 +1,50 @@
+from unittest.mock import MagicMock
+
 import pytest
 
 from ceki_browser import Browser, NavigateResult, QueryResult, Session
 from ceki_browser.errors import CekiBrowserError
+
+
+class MockRTC:
+    def __init__(self):
+        self._responses: dict[str, dict] = {}
+        self._calls: list[tuple[str, dict | None]] = []
+        self.cmd_channel = MagicMock()
+        self.cmd_channel.readyState = "open"
+        self.chat_channel = MagicMock()
+        self.chat_channel.readyState = "open"
+        self.pc = MagicMock()
+        self.pc.connectionState = "connected"
+        self._chat_history: list = []
+
+    def set_response(self, method: str, result: dict):
+        self._responses[method] = result
+
+    async def send_command(self, method: str, params: dict | None = None, timeout: float = 30.0):
+        self._calls.append((method, params))
+        if method in self._responses:
+            return self._responses[method]
+        return {}
+
+    async def send_chat_text(self, text: str):
+        pass
+
+    async def send_chat_image(self, data, mime=None):
+        pass
+
+    def on_chat_message(self, cb):
+        pass
+
+    def on_chat_image(self, cb):
+        pass
+
+    @property
+    def chat_history(self):
+        return list(self._chat_history)
+
+    async def close(self):
+        pass
 
 
 class MockTransport:
@@ -37,6 +80,18 @@ class MockTransport:
         return True
 
 
+def make_session_with_mock_rtc() -> tuple[Session, MockRTC]:
+    mt = MockTransport()
+    mock_rtc = MockRTC()
+    sess = Session(mt, "req-1", "incognito")
+    sess._active = True
+    sess._session_id = "sess-1"
+    sess._rtc = mock_rtc
+    from ceki_browser.session import ChatAPI
+    sess._chat = ChatAPI(mock_rtc)
+    return sess, mock_rtc
+
+
 @pytest.mark.asyncio
 async def test_browser_connect_and_close():
     mt = MockTransport()
@@ -54,12 +109,8 @@ async def test_browser_connect_and_close():
 
 @pytest.mark.asyncio
 async def test_session_navigate():
-    mt = MockTransport()
-    mt.set_response("browser.navigate", {"url": "https://example.com", "title": "Example", "status": 200})
-
-    sess = Session(mt, "req-1", "incognito")  # type: ignore[arg-type]
-    sess._active = True
-    sess._session_id = "sess-1"
+    sess, rtc = make_session_with_mock_rtc()
+    rtc.set_response("browser.navigate", {"url": "https://example.com", "title": "Example", "status": 200})
 
     result = await sess.navigate("https://example.com")
     assert isinstance(result, NavigateResult)
@@ -69,11 +120,8 @@ async def test_session_navigate():
 
 @pytest.mark.asyncio
 async def test_session_query():
-    mt = MockTransport()
-    mt.set_response("browser.query", {"elements": [{"textContent": "Hello World"}]})
-
-    sess = Session(mt, "req-1", "incognito")  # type: ignore[arg-type]
-    sess._active = True
+    sess, rtc = make_session_with_mock_rtc()
+    rtc.set_response("browser.query", {"elements": [{"textContent": "Hello World"}]})
 
     result = await sess.query("h1")
     assert isinstance(result, QueryResult)
@@ -83,15 +131,12 @@ async def test_session_query():
 
 @pytest.mark.asyncio
 async def test_session_query_all():
-    mt = MockTransport()
-    mt.set_response("browser.query_all", {"elements": [
+    sess, rtc = make_session_with_mock_rtc()
+    rtc.set_response("browser.query_all", {"elements": [
         {"textContent": "Item 1"},
         {"textContent": "Item 2"},
         {"textContent": "Item 3"},
     ]})
-
-    sess = Session(mt, "req-1", "incognito")  # type: ignore[arg-type]
-    sess._active = True
 
     result = await sess.query_all("li")
     assert len(result) == 3
@@ -100,7 +145,7 @@ async def test_session_query_all():
 @pytest.mark.asyncio
 async def test_session_inactive_raises():
     mt = MockTransport()
-    sess = Session(mt, "req-1", "incognito")  # type: ignore[arg-type]
+    sess = Session(mt, "req-1", "incognito")
 
     with pytest.raises(CekiBrowserError, match="not active"):
         await sess.navigate("https://example.com")
@@ -108,27 +153,21 @@ async def test_session_inactive_raises():
 
 @pytest.mark.asyncio
 async def test_session_click_and_type():
-    mt = MockTransport()
-    mt.set_response("browser.click", {"clicked": True})
-    mt.set_response("browser.type", {"typed": True})
-
-    sess = Session(mt, "req-1", "incognito")  # type: ignore[arg-type]
-    sess._active = True
+    sess, rtc = make_session_with_mock_rtc()
+    rtc.set_response("browser.click", {"clicked": True})
+    rtc.set_response("browser.type", {"typed": True})
 
     await sess.click(selector="#btn")
     await sess.type("#input", "hello")
 
-    assert mt._calls[0] == ("browser.click", {"selector": "#btn"})
-    assert mt._calls[1] == ("browser.type", {"selector": "#input", "text": "hello", "delay_ms": 0})
+    assert rtc._calls[0] == ("browser.click", {"selector": "#btn"})
+    assert rtc._calls[1] == ("browser.type", {"selector": "#input", "text": "hello", "delay_ms": 0})
 
 
 @pytest.mark.asyncio
 async def test_session_screenshot():
-    mt = MockTransport()
-    mt.set_response("browser.screenshot", {"data": "base64data", "width": 1920, "height": 1080})
-
-    sess = Session(mt, "req-1", "incognito")  # type: ignore[arg-type]
-    sess._active = True
+    sess, rtc = make_session_with_mock_rtc()
+    rtc.set_response("browser.screenshot", {"data": "base64data", "width": 1920, "height": 1080})
 
     result = await sess.screenshot()
     assert result.data == "base64data"
@@ -139,8 +178,7 @@ async def test_session_screenshot():
 async def test_session_end():
     mt = MockTransport()
     mt.set_response("session.end", {"status": "ended"})
-
-    sess = Session(mt, "req-1", "incognito")  # type: ignore[arg-type]
+    sess = Session(mt, "req-1", "incognito")
     sess._active = True
     sess._session_id = "sess-1"
 
@@ -152,8 +190,7 @@ async def test_session_end():
 async def test_session_context_manager():
     mt = MockTransport()
     mt.set_response("session.end", {"status": "ended"})
-
-    sess = Session(mt, "req-1", "incognito")  # type: ignore[arg-type]
+    sess = Session(mt, "req-1", "incognito")
     sess._active = True
 
     async with sess:
