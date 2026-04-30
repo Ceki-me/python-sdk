@@ -85,6 +85,9 @@ class RTCTransport:
         self._assemblers: dict[str, _ImageAssembler] = {}
         self._total_image_bytes = 0
 
+        self._cmd_open_event = asyncio.Event()
+        self._chat_open_event = asyncio.Event()
+
         self.cmd_channel = self.pc.createDataChannel("ceki-cmd", ordered=True)
         self.chat_channel = self.pc.createDataChannel("ceki-chat", ordered=True)
 
@@ -141,11 +144,30 @@ class RTCTransport:
         candidate_str = candidate_data.get("candidate", "")
         if not candidate_str:
             return
-        candidate = RTCIceCandidate(
-            candidate_str,
-            sdpMid=candidate_data.get("sdpMid", "0"),
-            sdpMLineIndex=candidate_data.get("sdpMLineIndex", 0),
-        )
+        sdp_mid = candidate_data.get("sdpMid", "0")
+        sdp_mline = candidate_data.get("sdpMLineIndex", 0)
+        if candidate_str.lstrip().startswith("{"):
+            try:
+                obj = json.loads(candidate_str)
+            except json.JSONDecodeError:
+                logger.debug("addIceCandidate: malformed JSON, skipping")
+                return
+            candidate_str = obj.get("candidate", "") or ""
+            sdp_mid = obj.get("sdpMid", sdp_mid)
+            sdp_mline = obj.get("sdpMLineIndex", sdp_mline)
+            if not candidate_str:
+                return
+        from aiortc.sdp import candidate_from_sdp
+        sdp = candidate_str
+        if sdp.startswith("candidate:"):
+            sdp = sdp[len("candidate:"):]
+        try:
+            candidate = candidate_from_sdp(sdp)
+        except Exception as exc:
+            logger.debug("addIceCandidate: failed to parse SDP %r: %s", sdp, exc)
+            return
+        candidate.sdpMid = sdp_mid
+        candidate.sdpMLineIndex = sdp_mline
         await self.pc.addIceCandidate(candidate)
 
     async def wait_connected(self, timeout: float = 30.0) -> None:
@@ -155,6 +177,11 @@ class RTCTransport:
             raise CekiBrowserError("WebRTC connection timed out")
         if self.pc.connectionState != "connected":
             raise CekiBrowserError(f"WebRTC connection failed: {self.pc.connectionState}")
+        if self.cmd_channel and self.cmd_channel.readyState != "open":
+            try:
+                await asyncio.wait_for(self._cmd_open_event.wait(), timeout=10.0)
+            except asyncio.TimeoutError:
+                raise CekiBrowserError("Command DataChannel did not open after RTC connect")
 
     async def send_command(self, method: str, params: dict[str, Any] | None = None, timeout: float = 30.0) -> Any:
         if not self.cmd_channel or self.cmd_channel.readyState != "open":
@@ -272,6 +299,10 @@ class RTCTransport:
         await self.pc.close()
 
     def _setup_cmd_channel(self, channel: RTCDataChannel) -> None:
+        @channel.on("open")
+        def on_open() -> None:
+            self._cmd_open_event.set()
+
         @channel.on("message")
         def on_message(data: str | bytes) -> None:
             try:
@@ -292,6 +323,10 @@ class RTCTransport:
                     fut.set_result(msg.get("result"))
 
     def _setup_chat_channel(self, channel: RTCDataChannel) -> None:
+        @channel.on("open")
+        def on_open() -> None:
+            self._chat_open_event.set()
+
         @channel.on("message")
         def on_message(data: str | bytes) -> None:
             try:
