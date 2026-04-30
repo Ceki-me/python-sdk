@@ -303,6 +303,23 @@ class Session:
         data = await self._rtc.send_command("tabs.close", {"session_id": self._session_id, "tab_id": tab_id})
         return data if isinstance(data, dict) else {}
 
+    async def mouse_click(self, x: float, y: float, button: str = "left") -> None:
+        self._check_active()
+        await self._rtc.send_command("mouse.click", {"session_id": self._session_id, "x": x, "y": y, "button": button})
+
+    async def mouse_move(self, x: float, y: float) -> None:
+        self._check_active()
+        await self._rtc.send_command("mouse.move", {"session_id": self._session_id, "x": x, "y": y})
+
+    async def click_real(self, selector: str) -> dict[str, Any]:
+        self._check_active()
+        data = await self._rtc.send_command("mouse.click_selector", {"session_id": self._session_id, "selector": selector})
+        return data if isinstance(data, dict) else {}
+
+    async def key_press(self, key: str) -> None:
+        self._check_active()
+        await self._rtc.send_command("keyboard.press", {"session_id": self._session_id, "key": key})
+
     async def inject_credentials(self, secret_id: str, target: dict[str, str]) -> dict[str, Any]:
         self._check_active()
         params = {"secret_id": secret_id, **target}
