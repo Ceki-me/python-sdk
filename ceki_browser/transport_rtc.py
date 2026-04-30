@@ -182,6 +182,11 @@ class RTCTransport:
                 await asyncio.wait_for(self._cmd_open_event.wait(), timeout=10.0)
             except asyncio.TimeoutError:
                 raise CekiBrowserError("Command DataChannel did not open after RTC connect")
+        if self.chat_channel and self.chat_channel.readyState != "open":
+            try:
+                await asyncio.wait_for(self._chat_open_event.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("Chat DataChannel did not open — chat will be unavailable")
 
     async def send_command(self, method: str, params: dict[str, Any] | None = None, timeout: float = 30.0) -> Any:
         if not self.cmd_channel or self.cmd_channel.readyState != "open":
@@ -303,6 +308,9 @@ class RTCTransport:
         def on_open() -> None:
             self._cmd_open_event.set()
 
+        if channel.readyState == "open":
+            self._cmd_open_event.set()
+
         @channel.on("message")
         def on_message(data: str | bytes) -> None:
             try:
@@ -325,6 +333,9 @@ class RTCTransport:
     def _setup_chat_channel(self, channel: RTCDataChannel) -> None:
         @channel.on("open")
         def on_open() -> None:
+            self._chat_open_event.set()
+
+        if channel.readyState == "open":
             self._chat_open_event.set()
 
         @channel.on("message")
