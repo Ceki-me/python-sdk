@@ -64,6 +64,7 @@ class Session:
         self._rtc: RTCTransport | None = None
         self._chat: ChatAPI | None = None
         self._ice_servers = ice_servers or [{"urls": "stun:stun.l.google.com:19302"}]
+        self._tab_opened_callback: Callable[[dict[str, Any]], Any] | None = None
 
     @property
     def session_id(self) -> str | None:
@@ -189,6 +190,18 @@ class Session:
         async def _on_event(method: str, params: dict[str, Any]) -> None:
             if method == "session.ended":
                 self._active = False
+            elif method == "tab.opened":
+                if self._tab_opened_callback:
+                    result = self._tab_opened_callback(params)
+                    if asyncio.iscoroutine(result):
+                        await result
+                else:
+                    tab_id = params.get("tab_id")
+                    if tab_id is not None:
+                        try:
+                            await self._rtc.send_command("tabs.close", {"session_id": self._session_id, "tab_id": tab_id})
+                        except Exception:
+                            pass
             if original_cb:
                 result = original_cb(method, params)
                 if asyncio.iscoroutine(result):
@@ -275,6 +288,20 @@ class Session:
         self._check_active()
         data = await self._rtc.send_command("browser.reload")
         return parse_result(data, NavigateResult)
+
+    def on_tab_opened(self, callback: Callable[[dict[str, Any]], Any]) -> None:
+        """Register a listener for new tab events. Params dict has: session_id, tab_id, url, opener_tab_id."""
+        self._tab_opened_callback = callback
+
+    async def switch_tab(self, tab_id: int) -> dict[str, Any]:
+        self._check_active()
+        data = await self._rtc.send_command("tabs.switch", {"session_id": self._session_id, "tab_id": tab_id})
+        return data if isinstance(data, dict) else {}
+
+    async def close_tab(self, tab_id: int) -> dict[str, Any]:
+        self._check_active()
+        data = await self._rtc.send_command("tabs.close", {"session_id": self._session_id, "tab_id": tab_id})
+        return data if isinstance(data, dict) else {}
 
     async def inject_credentials(self, secret_id: str, target: dict[str, str]) -> dict[str, Any]:
         self._check_active()
