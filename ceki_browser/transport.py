@@ -156,7 +156,11 @@ class Transport:
                 if self._ws and not self._closed:
                     try:
                         await self.send("heartbeat", timeout=5.0)
-                    except (CekiBrowserError, asyncio.CancelledError):
+                    except CommandTimeout:
+                        logger.warning("heartbeat response timed out, retrying next cycle")
+                    except asyncio.CancelledError:
+                        break
+                    except CekiBrowserError:
                         break
         except asyncio.CancelledError:
             return
