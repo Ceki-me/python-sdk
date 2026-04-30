@@ -2,6 +2,8 @@
 
 После переключения relay на Sanctum introspect (#79) и фикса cmd-channel hang (#77).
 
+> **Synthetic smokes удалены 2026-04-30.** Файлы `mvp_smoke.py`, `quickstart.py`, `login_flow.py` (example.com / app.example.com) удалены. Browserlend MVP smoke = real-site тест (Reddit/Twitter/GitHub) — см. отдельный smoke-runner у ceki-qa.
+
 ## Что проверяет smoke runner
 
 - **connect** — agent WS подключается к relay (Sanctum introspect, type=agent, ability browser:relay)
@@ -11,9 +13,7 @@
 - **chat** — отправка/получение сообщений и изображений через relay chat
 - **session end** — корректное завершение сессии
 
-Два скрипта:
-- `examples/mvp_smoke.py` — relay chat (основной)
-- `examples/mvp_smoke_p2p.py` — relay chat + image transfer
+Скрипт: `examples/mvp_smoke_p2p.py` — relay chat + P2P commands (навигация на github.com)
 
 ## Pre-flight checklist
 
@@ -49,13 +49,6 @@ RELAY_URL="wss://browser.ittribe.org/ws/agent" \
 python examples/mvp_smoke_p2p.py
 ```
 
-Для минимального smoke (без image transfer):
-```bash
-CEKI_TOKEN="<токен>" \
-RELAY_URL="wss://browser.ittribe.org/ws/agent" \
-python examples/mvp_smoke.py
-```
-
 ## Что видеть в выводе (success)
 
 ```
@@ -63,8 +56,8 @@ INFO  mvp_smoke_p2p: PASS  connect — agent_id=...
 INFO  mvp_smoke_p2p: PASS  session_matched — session_id=...
 INFO  mvp_smoke_p2p: PASS  rtc_connected — connectionState=connected
 INFO  mvp_smoke_p2p: PASS  chat_available — relay chat API ready
-INFO  mvp_smoke_p2p: PASS  navigate — url=https://example.com
-INFO  mvp_smoke_p2p: PASS  query_h1 — text='Example Domain'
+INFO  mvp_smoke_p2p: PASS  navigate — url=https://github.com
+INFO  mvp_smoke_p2p: PASS  query_dom — text='...'
 INFO  mvp_smoke_p2p: PASS  click — a
 INFO  mvp_smoke_p2p: PASS  screenshot — 1920x1080 150KB
 INFO  mvp_smoke_p2p: PASS  session_end — reason=completed
@@ -72,7 +65,7 @@ INFO  mvp_smoke_p2p: STATUS: PASS
 ```
 
 Критические шаги (FAIL = smoke красный):
-`connect`, `session_matched`, `rtc_connected`, `navigate`, `query_h1`, `screenshot`, `chat_send_text`, `chat_send_image`, `session_end`
+`connect`, `session_matched`, `rtc_connected`, `navigate`, `query_dom`, `screenshot`, `chat_send_text`, `chat_send_image`, `session_end`
 
 ## Мониторинг (два терминала)
 
@@ -91,7 +84,7 @@ docker compose logs -f browser-relay
 
 ## Известные не-баги
 
-- `type` step может быть `type_skipped` — на example.com нет input-полей, это ожидаемо
+- `type` step может быть `type_skipped` — на целевом сайте может не быть input-полей, это ожидаемо
 - `chat_recv_message` может FAIL если провайдер не ответил вручную в течение 30с — не баг runner'а
 - `chat_history_partial` — история может быть пустой если chat-service не сохранил сообщения, не критично
 - В `session.test.ts` (js-sdk) 2 pre-existing failures — не связаны со smoke

@@ -135,17 +135,17 @@ async def main() -> int:
 
             # --- Step 6: Navigate via ceki-cmd DataChannel ---
             try:
-                nav = await session.navigate("https://example.com")
+                nav = await session.navigate("https://github.com")
                 step_ok("navigate", f"url={nav.url}")
             except Exception as e:
                 step_fail("navigate", str(e))
 
             # --- Step 7: Query DOM ---
             try:
-                result = await session.query("h1")
-                step_ok("query_h1", f"text={result.text!r}")
+                result = await session.query("a")
+                step_ok("query_dom", f"text={result.text!r}")
             except Exception as e:
-                step_fail("query_h1", str(e))
+                step_fail("query_dom", str(e))
 
             # --- Step 8: Click ---
             try:
@@ -154,12 +154,12 @@ async def main() -> int:
             except Exception as e:
                 step_fail("click", str(e))
 
-            # --- Step 9: Type (best-effort, may fail on example.com) ---
+            # --- Step 9: Type into search ---
             try:
                 await session.type("input[name='q']", "hello")
                 step_ok("type", "input[name='q'] 'hello'")
             except CekiBrowserError:
-                step_ok("type_skipped", "no input on page (expected for example.com)")
+                step_ok("type_skipped", "no matching input on page")
             except Exception as e:
                 step_fail("type", str(e))
 
@@ -254,7 +254,7 @@ async def main() -> int:
 
     critical_steps = {
         "connect", "session_matched", "rtc_connected", "navigate",
-        "query_h1", "screenshot", "chat_send_text", "chat_send_image",
+        "query_dom", "screenshot", "chat_send_text", "chat_send_image",
         "session_end",
     }
     critical_fails = [s for s in STEPS_FAILED if s in critical_steps]
