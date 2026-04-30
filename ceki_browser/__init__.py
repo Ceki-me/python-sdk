@@ -1,5 +1,6 @@
 from .chat_direct import ChatClient
 from .client import Browser
+from .humanize import HumanProfile, Humanizer
 from .errors import (
     AuthError,
     CekiBrowserError,
@@ -29,6 +30,8 @@ __all__ = [
     "Browser",
     "ChatAPI",
     "ChatClient",
+    "HumanProfile",
+    "Humanizer",
     "Session",
     "RTCTransport",
     "ChatImage",
@@ -53,4 +56,4 @@ __all__ = [
     "TypingEvent",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

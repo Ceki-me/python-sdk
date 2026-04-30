@@ -3,14 +3,15 @@ from __future__ import annotations
 from typing import Any
 
 from .errors import CekiBrowserError
-from .session import Session
+from .session import Session, _HUMAN_DEFAULT
 from .transport import DEFAULT_RELAY_URL, Transport
 
 
 class Browser:
-    def __init__(self, token: str, relay_url: str = DEFAULT_RELAY_URL):
+    def __init__(self, token: str, relay_url: str = DEFAULT_RELAY_URL, human: Any = _HUMAN_DEFAULT):
         self._transport = Transport(token=token, relay_url=relay_url)
         self._connected = False
+        self._human = human
 
     @property
     def agent_id(self) -> str | None:
@@ -41,6 +42,7 @@ class Browser:
         max_price_per_min: float = 1.0,
         estimated_duration_min: int = 30,
         wait_timeout: float = 60.0,
+        human: Any = _HUMAN_DEFAULT,
     ) -> Session:
         if not self._connected:
             raise CekiBrowserError("Not connected. Call connect() or use `async with Browser(...)`")
@@ -57,7 +59,8 @@ class Browser:
         if language:
             params["language"] = language
 
-        sess = Session(self._transport, "", mode)
+        effective_human = human if human is not _HUMAN_DEFAULT else self._human
+        sess = Session(self._transport, "", mode, human=effective_human)
         sess._match_state = sess._install_match_listener()
 
         result = await self._transport.send("session.request", params, timeout=30)

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "name": "natural",
+  "typing": {
+    "wpm": 110,
+    "jitter": 0.35,
+    "thinking_pause_prob": 0.012,
+    "thinking_pause_ms": [300, 1200],
+    "typo_prob": 0.0
+  },
+  "pre_action_ms": {
+    "click": [80, 350],
+    "type": [120, 500],
+    "scroll": [50, 250],
+    "navigate": [0, 0],
+    "screenshot": [0, 0]
+  },
+  "post_action_ms": {
+    "click": [150, 800],
+    "type": [150, 800],
+    "scroll": [200, 900],
+    "navigate": [400, 1800],
+    "screenshot": [0, 0]
+  },
+  "mouse": {
+    "move_before_click": false,
+    "trajectory": "off"
+  },
+  "rng_seed": null
+}

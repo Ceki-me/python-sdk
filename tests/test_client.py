@@ -80,10 +80,10 @@ class MockTransport:
         return True
 
 
-def make_session_with_mock_rtc() -> tuple[Session, MockRTC]:
+def make_session_with_mock_rtc(human=None) -> tuple[Session, MockRTC]:
     mt = MockTransport()
     mock_rtc = MockRTC()
-    sess = Session(mt, "req-1", "incognito")
+    sess = Session(mt, "req-1", "incognito", human=human)
     sess._active = True
     sess._session_id = "sess-1"
     sess._rtc = mock_rtc

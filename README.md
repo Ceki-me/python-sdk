@@ -144,6 +144,87 @@ async with Browser(token=TOKEN) as br:
 
 Set `CEKI_CHAT_SERVICE_URL` env var to override the chat-service URL (default: `https://chat.ceki.me`).
 
+## Human Mode
+
+SDK includes built-in human-like behavior simulation (delays, typing jitter) enabled by default.
+
+### Profiles
+
+```python
+# Default — natural delays (enabled by default)
+async with Browser(token, human="natural") as br:
+    s = await br.session()
+
+# Careful — slower, more human-like
+async with Browser(token, human="careful") as br:
+    s = await br.session()
+
+# Disabled — no delays
+async with Browser(token, human=None) as br:
+    s = await br.session()
+
+# Custom profile from dict
+async with Browser(token, human={"typing": {"wpm": 140}, "pre_action_ms": {"click": [50, 200]}}) as br:
+    s = await br.session()
+
+# Custom profile from JSON file
+async with Browser(token, human="./my_profile.json") as br:
+    s = await br.session()
+```
+
+### Runtime Profile Change
+
+```python
+prev = s.set_human("careful")  # switch to careful
+await s.type("#email", "user@example.com")
+s.set_human(prev)  # restore previous
+```
+
+### Profile JSON Schema
+
+```json
+{
+  "version": 1,
+  "name": "natural",
+  "typing": {
+    "wpm": 110,
+    "jitter": 0.35,
+    "thinking_pause_prob": 0.012,
+    "thinking_pause_ms": [300, 1200],
+    "typo_prob": 0.0
+  },
+  "pre_action_ms": {
+    "click": [80, 350],
+    "type": [120, 500],
+    "scroll": [50, 250],
+    "navigate": [0, 0],
+    "screenshot": [0, 0]
+  },
+  "post_action_ms": {
+    "click": [150, 800],
+    "type": [150, 800],
+    "scroll": [200, 900],
+    "navigate": [400, 1800],
+    "screenshot": [0, 0]
+  },
+  "mouse": {
+    "move_before_click": false,
+    "trajectory": "off"
+  },
+  "rng_seed": null
+}
+```
+
+### Environment Variables
+
+| Variable | Description |
+|---|---|
+| `CEKI_HUMAN_PROFILE` | Preset name (`natural`, `careful`) |
+| `CEKI_HUMAN_PROFILE_PATH` | Path to custom JSON profile |
+| `CEKI_HUMAN_DISABLE=1` | Disable all human-mode delays |
+
+Priority: explicit `Browser(human=...)` > env vars > default (`natural`).
+
 ## Examples
 
 - [`quickstart.py`](examples/quickstart.py) — minimal 5-line example

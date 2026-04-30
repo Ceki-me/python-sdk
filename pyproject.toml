@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ceki-browser"
-version = "0.2.0"
+version = "0.3.0"
 description = "Python SDK for browser.ceki.me — rent real browsers of real people"
 readme = "README.md"
 license = {text = "MIT"}
@@ -42,6 +42,9 @@ Documentation = "https://github.com/Ceki-me/python-sdk#readme"
 
 [tool.setuptools.packages.find]
 include = ["ceki_browser*"]
+
+[tool.setuptools.package-data]
+"ceki_browser.humanize" = ["profiles/*.json"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

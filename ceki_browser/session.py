@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+from pathlib import Path
 from typing import Any, Callable
 
 from .chat_direct import ChatClient, DEFAULT_CHAT_SERVICE_URL
 from .errors import CekiBrowserError, NoMatchError, SessionEndedError
+from .humanize import HumanProfile, Humanizer
 from .transport import Transport
 from .transport_rtc import ChatImage, ChatTextMessage, RTCTransport
 from .types import (
@@ -18,6 +21,43 @@ from .types import (
 )
 
 logger = logging.getLogger("ceki_browser")
+
+
+def _resolve_human_profile(human: Any) -> HumanProfile | None:
+    """Resolve human parameter to HumanProfile or None."""
+    if os.environ.get("CEKI_HUMAN_DISABLE") == "1":
+        return None
+    if human is None:
+        return None
+    if isinstance(human, HumanProfile):
+        return human
+    if isinstance(human, dict):
+        return HumanProfile.from_dict(human)
+    if isinstance(human, Path):
+        return HumanProfile.load(human)
+    if isinstance(human, str):
+        # Check if it's a file path
+        if human.endswith(".json") or "/" in human or "\\" in human:
+            return HumanProfile.load(human)
+        # It's a preset name
+        return HumanProfile.load_preset(human)
+    raise ValueError(f"Invalid human profile: {human!r}")
+
+
+_HUMAN_DEFAULT = object()  # sentinel for "use default"
+
+
+def _get_default_human() -> Any:
+    """Get default human profile from env or 'natural'."""
+    if os.environ.get("CEKI_HUMAN_DISABLE") == "1":
+        return None
+    env_path = os.environ.get("CEKI_HUMAN_PROFILE_PATH")
+    if env_path:
+        return env_path
+    env_name = os.environ.get("CEKI_HUMAN_PROFILE")
+    if env_name:
+        return env_name
+    return "natural"
 
 
 class ChatAPI:
@@ -56,6 +96,7 @@ class Session:
         request_id: str,
         mode: str,
         ice_servers: list[dict[str, Any]] | None = None,
+        human: Any = _HUMAN_DEFAULT,
     ):
         self._transport = transport
         self._request_id = request_id
@@ -67,6 +108,10 @@ class Session:
         self._ice_servers = ice_servers or [{"urls": "stun:stun.l.google.com:19302"}]
         self._tab_opened_callback: Callable[[dict[str, Any]], Any] | None = None
         self._chat_direct: ChatClient | None = None
+        if human is _HUMAN_DEFAULT:
+            human = _get_default_human()
+        self._human_profile = _resolve_human_profile(human)
+        self._humanizer = Humanizer(self._human_profile)
 
     @property
     def session_id(self) -> str | None:
@@ -85,6 +130,16 @@ class Session:
     @property
     def rtc(self) -> RTCTransport | None:
         return self._rtc
+
+    @property
+    def humanizer(self) -> Humanizer:
+        return self._humanizer
+
+    def set_human(self, profile: Any) -> HumanProfile | None:
+        prev = self._human_profile
+        self._human_profile = _resolve_human_profile(profile)
+        self._humanizer = Humanizer(self._human_profile)
+        return prev
 
     def _install_match_listener(self) -> tuple[asyncio.Event, list[str], list[Exception]]:
         ready = asyncio.Event()
@@ -213,11 +268,13 @@ class Session:
 
     async def navigate(self, url: str, timeout_ms: int = 120000) -> NavigateResult:
         self._check_active()
+        await self._humanizer.before("navigate")
         data = await self._rtc.send_command(
             "browser.navigate",
             {"url": url, "timeout_ms": timeout_ms},
             timeout=timeout_ms / 1000 + 5,
         )
+        await self._humanizer.after("navigate")
         return parse_result(data, NavigateResult)
 
     async def query(self, selector: str, attributes: list[str] | None = None) -> QueryResult:
@@ -243,6 +300,7 @@ class Session:
 
     async def click(self, selector: str | None = None, x: int | None = None, y: int | None = None) -> None:
         self._check_active()
+        await self._humanizer.before("click")
         params: dict[str, Any] = {}
         if selector:
             params["selector"] = selector
@@ -251,10 +309,27 @@ class Session:
         if y is not None:
             params["y"] = y
         await self._rtc.send_command("browser.click", params)
+        await self._humanizer.after("click")
 
     async def type(self, selector: str, text: str, delay_ms: int = 0) -> None:
         self._check_active()
-        await self._rtc.send_command("browser.type", {"selector": selector, "text": text, "delay_ms": delay_ms})
+        await self._humanizer.before("type")
+        if self._human_profile:
+            # Click to focus the element first
+            await self._rtc.send_command("browser.click", {"selector": selector})
+            # Per-char typing with jitter
+            async for char, char_delay in self._humanizer.humanize_text(text):
+                await self._rtc.send_command("keyboard.press", {
+                    "session_id": self._session_id,
+                    "key": char,
+                })
+                if char_delay > 0:
+                    await asyncio.sleep(char_delay / 1000)
+        else:
+            await self._rtc.send_command("browser.type", {
+                "selector": selector, "text": text, "delay_ms": delay_ms,
+            })
+        await self._humanizer.after("type")
 
     async def scroll(
         self,
@@ -263,6 +338,7 @@ class Session:
         amount: int = 500,
     ) -> None:
         self._check_active()
+        await self._humanizer.before("scroll")
         params: dict[str, Any] = {}
         if selector:
             params["selector"] = selector
@@ -270,10 +346,13 @@ class Session:
             params["direction"] = direction
             params["amount"] = amount
         await self._rtc.send_command("browser.scroll", params)
+        await self._humanizer.after("scroll")
 
     async def screenshot(self, format: str = "png", quality: int = 80) -> ScreenshotResult:
         self._check_active()
+        await self._humanizer.before("screenshot")
         data = await self._rtc.send_command("browser.screenshot", {"format": format, "quality": quality})
+        await self._humanizer.after("screenshot")
         return parse_result(data, ScreenshotResult)
 
     async def back(self) -> NavigateResult:
@@ -315,7 +394,9 @@ class Session:
 
     async def click_real(self, selector: str) -> dict[str, Any]:
         self._check_active()
+        await self._humanizer.before("click")
         data = await self._rtc.send_command("mouse.click_selector", {"session_id": self._session_id, "selector": selector})
+        await self._humanizer.after("click")
         return data if isinstance(data, dict) else {}
 
     async def key_press(self, key: str) -> None:

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "name": "careful",
+  "typing": {
+    "wpm": 80,
+    "jitter": 0.4,
+    "thinking_pause_prob": 0.025,
+    "thinking_pause_ms": [400, 1800],
+    "typo_prob": 0.0
+  },
+  "pre_action_ms": {
+    "click": [200, 600],
+    "type": [250, 800],
+    "scroll": [100, 400],
+    "navigate": [0, 0],
+    "screenshot": [0, 0]
+  },
+  "post_action_ms": {
+    "click": [400, 1500],
+    "type": [300, 1200],
+    "scroll": [300, 1200],
+    "navigate": [800, 3000],
+    "screenshot": [0, 0]
+  },
+  "mouse": {
+    "move_before_click": false,
+    "trajectory": "off"
+  },
+  "rng_seed": null
+}
