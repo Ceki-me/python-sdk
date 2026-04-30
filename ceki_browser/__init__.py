@@ -14,8 +14,9 @@ from .errors import (
     RateLimited,
     SessionEndedError,
 )
-from .session import ChatAPI, Session
-from .transport_rtc import ChatImage, ChatTextMessage, RTCTransport
+from .chat import ChatAPI
+from .session import Session
+from .transport_rtc import RTCTransport
 from .types import (
     ChatMessage,
     HtmlResult,
@@ -34,8 +35,6 @@ __all__ = [
     "Humanizer",
     "Session",
     "RTCTransport",
-    "ChatImage",
-    "ChatTextMessage",
     "AuthError",
     "CekiBrowserError",
     "CommandTimeout",

@@ -26,7 +26,7 @@ import time
 
 from ceki_browser import Browser
 from ceki_browser.errors import CekiBrowserError
-from ceki_browser.transport_rtc import ChatImage, ChatTextMessage
+from ceki_browser.types import ChatMessage
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -79,8 +79,7 @@ async def main() -> int:
 
     t0 = time.time()
 
-    received_texts: list[ChatTextMessage] = []
-    received_images: list[ChatImage] = []
+    received_messages: list[ChatMessage] = []
 
     # --- Step 1: Connect to relay ---
     try:
@@ -117,24 +116,20 @@ async def main() -> int:
                 state = rtc.pc.connectionState if rtc else "no_rtc"
                 step_fail("rtc_connected", f"connectionState={state}")
 
-            # --- Step 4: P2P chat available ---
+            # --- Step 4: Chat available ---
             try:
                 chat = session.chat
-                if chat.available:
-                    step_ok("chat_available", "P2P chat DataChannel open")
-                else:
-                    step_fail("chat_available", "chat channel not open")
+                step_ok("chat_available", "relay chat API ready")
             except Exception as e:
                 step_fail("chat_available", str(e))
 
-            # Register chat listeners
-            session.chat.on_message(received_texts.append)
-            session.chat.on_image(received_images.append)
+            # Register chat listener
+            session.chat.on_message(received_messages.append)
 
             # --- Step 5: Send chat text ---
             try:
                 await session.chat.send("Привет, начинаю P2P-MVP smoke test.")
-                step_ok("chat_send_text", "sent via ceki-chat DataChannel")
+                step_ok("chat_send_text", "sent via relay")
             except Exception as e:
                 step_fail("chat_send_text", str(e))
 
@@ -176,64 +171,49 @@ async def main() -> int:
             except Exception as e:
                 step_fail("screenshot", str(e))
 
-            # --- Step 11: Send image via P2P chat ---
+            # --- Step 11: Send image via relay chat ---
             test_png = make_test_png(200 * 1024)
             test_png_sha256 = hashlib.sha256(test_png).hexdigest()
             log.info(f"Test image: {len(test_png)} bytes, sha256={test_png_sha256[:16]}...")
             try:
                 await session.chat.send_image(test_png, "image/png")
-                step_ok("chat_send_image", f"{len(test_png)} bytes sent via ceki-chat")
+                step_ok("chat_send_image", f"{len(test_png)} bytes sent via relay")
             except Exception as e:
                 step_fail("chat_send_image", str(e))
 
-            # --- Step 12: Wait for provider chat response (text + image) ---
+            # --- Step 12: Wait for provider chat response ---
             log.info("Waiting up to 30s for provider chat responses...")
             deadline = time.time() + 30
             while time.time() < deadline:
-                if len(received_texts) >= 1 and len(received_images) >= 1:
+                if len(received_messages) >= 1:
                     break
                 await asyncio.sleep(0.5)
 
-            if received_texts:
+            if received_messages:
                 step_ok(
-                    "chat_recv_text",
-                    f"got {len(received_texts)} msg(s), first: {received_texts[0].text[:50]!r}",
+                    "chat_recv_message",
+                    f"got {len(received_messages)} msg(s), first: {received_messages[0].content[:50]!r}",
                 )
             else:
                 step_fail(
-                    "chat_recv_text",
-                    "no text messages from provider (manual provider response required)",
-                )
-
-            if received_images:
-                img = received_images[0]
-                recv_sha = hashlib.sha256(img.data).hexdigest()
-                step_ok(
-                    "chat_recv_image",
-                    f"got {len(received_images)} img(s), first: {img.mime} {len(img.data)}B sha256={recv_sha[:16]}",
-                )
-            else:
-                step_fail(
-                    "chat_recv_image",
-                    "no images from provider (manual provider response required)",
+                    "chat_recv_message",
+                    "no messages from provider (manual provider response required)",
                 )
 
             # --- Step 13: Check chat history ---
-            history = session.chat.history
-            text_count = sum(1 for m in history if isinstance(m, ChatTextMessage))
-            img_count = sum(1 for m in history if isinstance(m, ChatImage))
-            log.info(f"Chat history: {len(history)} total ({text_count} texts, {img_count} images)")
-            if text_count >= 1 and img_count >= 1:
-                step_ok("chat_history", f"{text_count} texts + {img_count} images")
+            history = await session.chat.history()
+            log.info(f"Chat history: {len(history)} messages")
+            if len(history) >= 1:
+                step_ok("chat_history", f"{len(history)} messages")
             else:
                 step_ok(
                     "chat_history_partial",
-                    f"{text_count} texts + {img_count} images (provider response may be missing)",
+                    f"{len(history)} messages (provider response may be missing)",
                 )
 
             # --- Step 14: Second chat text ---
             try:
-                await session.chat.send("Smoke test завершается. Все команды отработали через P2P.")
+                await session.chat.send("Smoke test завершается. Все команды отработали.")
                 step_ok("chat_send_text_2", "sent")
             except Exception as e:
                 step_fail("chat_send_text_2", str(e))
@@ -248,8 +228,7 @@ async def main() -> int:
             # Verify RTC closed
             if rtc:
                 log.info(f"RTC state after end: {rtc.pc.connectionState}")
-            history_after = session.chat.history if session._chat else []
-            log.info(f"Chat history after close: {len(history_after)} items")
+            log.info("Session ended, chat closed")
 
         except Exception as e:
             log.error(f"Unexpected error during session: {e}", exc_info=True)

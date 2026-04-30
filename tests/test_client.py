@@ -12,11 +12,8 @@ class MockRTC:
         self._calls: list[tuple[str, dict | None]] = []
         self.cmd_channel = MagicMock()
         self.cmd_channel.readyState = "open"
-        self.chat_channel = MagicMock()
-        self.chat_channel.readyState = "open"
         self.pc = MagicMock()
         self.pc.connectionState = "connected"
-        self._chat_history: list = []
 
     def set_response(self, method: str, result: dict):
         self._responses[method] = result
@@ -26,22 +23,6 @@ class MockRTC:
         if method in self._responses:
             return self._responses[method]
         return {}
-
-    async def send_chat_text(self, text: str):
-        pass
-
-    async def send_chat_image(self, data, mime=None):
-        pass
-
-    def on_chat_message(self, cb):
-        pass
-
-    def on_chat_image(self, cb):
-        pass
-
-    @property
-    def chat_history(self):
-        return list(self._chat_history)
 
     async def close(self):
         pass
@@ -87,8 +68,8 @@ def make_session_with_mock_rtc(human=None) -> tuple[Session, MockRTC]:
     sess._active = True
     sess._session_id = "sess-1"
     sess._rtc = mock_rtc
-    from ceki_browser.session import ChatAPI
-    sess._chat = ChatAPI(mock_rtc)
+    from ceki_browser.chat import ChatAPI
+    sess._chat = ChatAPI(mt, "sess-1", None)
     return sess, mock_rtc
 
 

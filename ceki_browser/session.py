@@ -6,11 +6,12 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
+from .chat import ChatAPI
 from .chat_direct import ChatClient, DEFAULT_CHAT_SERVICE_URL
 from .errors import CekiBrowserError, NoMatchError, SessionEndedError
 from .humanize import HumanProfile, Humanizer
 from .transport import Transport
-from .transport_rtc import ChatImage, ChatTextMessage, RTCTransport
+from .transport_rtc import RTCTransport
 from .types import (
     HtmlResult,
     HumanActionResult,
@@ -60,35 +61,6 @@ def _get_default_human() -> Any:
     return "natural"
 
 
-class ChatAPI:
-    def __init__(self, rtc: RTCTransport):
-        self._rtc = rtc
-
-    @property
-    def available(self) -> bool:
-        return self._rtc.chat_channel is not None and self._rtc.chat_channel.readyState == "open"
-
-    async def send(self, text: str) -> None:
-        await self._rtc.send_chat_text(text)
-
-    async def send_image(
-        self,
-        data: bytes | str,
-        mime: str | None = None,
-    ) -> None:
-        await self._rtc.send_chat_image(data, mime)
-
-    def on_message(self, callback: Callable[[ChatTextMessage], Any]) -> None:
-        self._rtc.on_chat_message(callback)
-
-    def on_image(self, callback: Callable[[ChatImage], Any]) -> None:
-        self._rtc.on_chat_image(callback)
-
-    @property
-    def history(self) -> list[ChatTextMessage | ChatImage]:
-        return self._rtc.chat_history
-
-
 class Session:
     def __init__(
         self,
@@ -124,7 +96,7 @@ class Session:
     @property
     def chat(self) -> ChatAPI:
         if self._chat is None:
-            raise CekiBrowserError("Chat not available until session is active with P2P connection")
+            raise CekiBrowserError("Chat not available until session is active")
         return self._chat
 
     @property
@@ -190,7 +162,7 @@ class Session:
 
     async def _setup_rtc(self) -> None:
         self._rtc = RTCTransport(self._ice_servers)
-        self._chat = ChatAPI(self._rtc)
+        self._chat = ChatAPI(self._transport, self._session_id or self._request_id, None)
 
         signaling_done = asyncio.Event()
         answer_holder: list[dict[str, Any]] = []
@@ -259,6 +231,16 @@ class Session:
                             await self._rtc.send_command("tabs.close", {"session_id": self._session_id, "tab_id": tab_id})
                         except Exception:
                             pass
+            elif method == "chat.topic_created":
+                topic_id = params.get("chat_topic_id", "")
+                if self._chat:
+                    self._chat._set_topic_id(topic_id)
+            elif method == "chat.message":
+                if self._chat:
+                    self._chat._dispatch_message(params)
+            elif method == "chat.typing":
+                if self._chat:
+                    self._chat._dispatch_typing(params)
             if original_cb:
                 result = original_cb(method, params)
                 if asyncio.iscoroutine(result):

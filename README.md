@@ -4,7 +4,7 @@
 
 Python SDK for [browser.ceki.me](https://browser.ceki.me) — rent real browsers from real people for AI agent automation.
 
-All browser commands and chat messages travel over a direct WebRTC DataChannel between your agent and the provider's browser — the relay server only handles signaling and matchmaking. Connections are authenticated via STUN/TURN with identity validation.
+Browser commands travel over a direct WebRTC DataChannel between your agent and the provider's browser. Chat messages are routed through the relay server. The relay handles signaling, matchmaking, and chat. Connections are authenticated via STUN/TURN with identity validation.
 
 ## Installation
 
@@ -84,7 +84,7 @@ Create secrets via dashboard: **API Keys & Secrets** section.
 
 ## Chat
 
-During a browser session, your agent can exchange messages and images with the browser provider via `session.chat`. Chat flows over a dedicated `ceki-chat` WebRTC DataChannel — messages are ephemeral (in-memory only, not persisted).
+During a browser session, your agent can exchange messages and images with the browser provider via `session.chat`. Chat is routed through the relay server.
 
 ```python
 from ceki_browser import Browser
@@ -94,26 +94,22 @@ async def main():
         session = await br.session(mode="incognito", domain_hints=["example.com"])
 
         # Listen for incoming text messages
-        session.chat.on_message(lambda msg: print(f"Provider: {msg.text}"))
-
-        # Listen for incoming images
-        session.chat.on_image(lambda img: print(f"Image received: {img.mime}, {len(img.data)} bytes"))
+        session.chat.on_message(lambda msg: print(f"Provider: {msg.content}"))
 
         # Send text
         await session.chat.send("Starting automation, please don't close the browser")
 
-        # Send image (bytes, path, or base64)
+        # Send image (bytes or path)
         await session.chat.send_image(b"\x89PNG...", "image/png")
         await session.chat.send_image("screenshot.png")
 
-        # Access ephemeral history
-        for item in session.chat.history:
-            print(item)
+        # Fetch message history from server
+        messages = await session.chat.history()
+        for msg in messages:
+            print(msg)
 
         await session.end()
 ```
-
-Images over 5MB are auto-downscaled (requires Pillow) or rejected. Large images are chunked over the DataChannel (12KB chunks, 30s assembly timeout).
 
 ### Direct Chat (chat-service REST + WS)
 
