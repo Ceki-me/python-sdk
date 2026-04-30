@@ -115,6 +115,35 @@ async def main():
 
 Images over 5MB are auto-downscaled (requires Pillow) or rejected. Large images are chunked over the DataChannel (12KB chunks, 30s assembly timeout).
 
+### Direct Chat (chat-service REST + WS)
+
+For server-side chat access (polling, recovery, live push) independent of P2P:
+
+```python
+async with Browser(token=TOKEN) as br:
+    session = await br.session()
+
+    # topic_id from rent or passed manually
+    chat = session.chat_direct(topic_id="<topic_id>")
+
+    # Fetch message history (forward cursor)
+    msgs = await chat.history(after="<last_known_id>", limit=50)
+
+    # Send a message via REST
+    await chat.send("Hello from agent")
+
+    # Subscribe to live push via WebSocket
+    async def on_msg(msg):
+        print("new:", msg.get("content"))
+
+    await chat.subscribe(on_msg)
+
+    # ... do work ...
+    await chat.close()
+```
+
+Set `CEKI_CHAT_SERVICE_URL` env var to override the chat-service URL (default: `https://chat.ceki.me`).
+
 ## Examples
 
 - [`quickstart.py`](examples/quickstart.py) — minimal 5-line example

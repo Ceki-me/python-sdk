@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import Any, Callable
 
+from .chat_direct import ChatClient, DEFAULT_CHAT_SERVICE_URL
 from .errors import CekiBrowserError, NoMatchError, SessionEndedError
 from .transport import Transport
 from .transport_rtc import ChatImage, ChatTextMessage, RTCTransport
@@ -65,6 +66,7 @@ class Session:
         self._chat: ChatAPI | None = None
         self._ice_servers = ice_servers or [{"urls": "stun:stun.l.google.com:19302"}]
         self._tab_opened_callback: Callable[[dict[str, Any]], Any] | None = None
+        self._chat_direct: ChatClient | None = None
 
     @property
     def session_id(self) -> str | None:
@@ -347,6 +349,24 @@ class Session:
         )
         return parse_result(data, HumanActionResult)
 
+    def chat_direct(
+        self,
+        topic_id: str | None = None,
+        chat_service_url: str = DEFAULT_CHAT_SERVICE_URL,
+    ) -> ChatClient:
+        tid = topic_id or getattr(self, "chat_topic_id", None)
+        if not tid:
+            raise CekiBrowserError(
+                "topic_id required: pass it explicitly or set session.chat_topic_id"
+            )
+        token = self._transport._token
+        self._chat_direct = ChatClient(
+            token=token,
+            topic_id=tid,
+            base_url=chat_service_url,
+        )
+        return self._chat_direct
+
     async def end(self, reason: str = "completed") -> None:
         if not self._active:
             return
@@ -359,6 +379,9 @@ class Session:
             )
         except CekiBrowserError:
             pass
+        if self._chat_direct:
+            await self._chat_direct.close()
+            self._chat_direct = None
         if self._rtc:
             await self._rtc.close()
             self._rtc = None

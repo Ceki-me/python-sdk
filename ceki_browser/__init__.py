@@ -1,3 +1,4 @@
+from .chat_direct import ChatClient
 from .client import Browser
 from .errors import (
     AuthError,
@@ -27,6 +28,7 @@ from .types import (
 __all__ = [
     "Browser",
     "ChatAPI",
+    "ChatClient",
     "Session",
     "RTCTransport",
     "ChatImage",
