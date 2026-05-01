@@ -43,6 +43,7 @@ class Browser:
         estimated_duration_min: int = 30,
         wait_timeout: float = 60.0,
         human: Any = _HUMAN_DEFAULT,
+        schedule_id: int | None = None,
     ) -> Session:
         if not self._connected:
             raise CekiBrowserError("Not connected. Call connect() or use `async with Browser(...)`")
@@ -58,6 +59,8 @@ class Browser:
             params["geo"] = geo
         if language:
             params["language"] = language
+        if schedule_id is not None:
+            params["schedule_id"] = int(schedule_id)
 
         effective_human = human if human is not _HUMAN_DEFAULT else self._human
         sess = Session(self._transport, "", mode, human=effective_human)
