@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any, Callable
 
 from aiortc import (
@@ -17,6 +18,7 @@ from aiortc import (
 from .errors import CekiBrowserError, CommandTimeout
 
 logger = logging.getLogger("ceki_browser")
+bridge_probe = logging.getLogger("ceki_browser.bridge_probe")
 
 SignalingCallback = Callable[[str, dict[str, Any]], Any]
 
@@ -29,12 +31,16 @@ class RTCTransport:
         self.pc = RTCPeerConnection(config)
         self.cmd_channel: RTCDataChannel | None = None
         self._cmd_pending: dict[int, asyncio.Future[Any]] = {}
+        self._cmd_send_ts: dict[int, float] = {}  # msg_id -> send timestamp ms
         self._cmd_next_id = 1
         self._signaling_callback: SignalingCallback | None = None
         self._connected_event = asyncio.Event()
         self._closed = False
 
         self._cmd_open_event = asyncio.Event()
+
+        # Chunk reassembly: {msg_id: {"n": total, "parts": {i: str, ...}, "received": set}}
+        self._chunk_buf: dict[int, dict[str, Any]] = {}
 
         self.cmd_channel = self.pc.createDataChannel("ceki-cmd", ordered=True)
 
@@ -132,6 +138,7 @@ class RTCTransport:
 
         fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         self._cmd_pending[msg_id] = fut
+        self._cmd_send_ts[msg_id] = time.time() * 1000
 
         self.cmd_channel.send(json.dumps(payload))
 
@@ -139,6 +146,7 @@ class RTCTransport:
             return await asyncio.wait_for(fut, timeout=timeout)
         except asyncio.TimeoutError:
             self._cmd_pending.pop(msg_id, None)
+            self._cmd_send_ts.pop(msg_id, None)
             raise CommandTimeout(f"Command {method} timed out after {timeout}s", code=-1020)
 
     async def close(self) -> None:
@@ -159,15 +167,53 @@ class RTCTransport:
         if channel.readyState == "open":
             self._cmd_open_event.set()
 
-        @channel.on("message")
-        def on_message(data: str | bytes) -> None:
-            try:
-                msg = json.loads(data)
-            except (json.JSONDecodeError, TypeError):
+        def _process_chunk(msg: dict[str, Any]) -> None:
+            chunk_id = msg.get("id")
+            if chunk_id is None:
                 return
+            chunk = msg["chunk"]
+            i = chunk["i"]
+            n = chunk["n"]
+            data_slice = chunk["data"]
+            if chunk_id not in self._chunk_buf:
+                self._chunk_buf[chunk_id] = {"n": n, "parts": {}, "received": set()}
+            buf = self._chunk_buf[chunk_id]
+            buf["parts"][i] = data_slice
+            buf["received"].add(i)
+            if len(buf["received"]) == n:
+                full = "".join(buf["parts"][j] for j in range(n))
+                del self._chunk_buf[chunk_id]
+                try:
+                    full_msg = json.loads(full)
+                except (json.JSONDecodeError, TypeError):
+                    return
+                _dispatch_response(full_msg)
 
+        def _dispatch_response(msg: dict[str, Any]) -> None:
+            method = msg.get("method")
+            if method == "bridge.cmd_received":
+                params = msg.get("params") or {}
+                cmd_id = params.get("id")
+                send_ts = self._cmd_send_ts.get(cmd_id) if cmd_id is not None else None
+                latency = int(params.get("ts", time.time() * 1000) - send_ts) if send_ts is not None else -1
+                bridge_probe.info(
+                    "bridge.cmd_received id=%s method=%s latency_send_to_recv=%dms channel_state=%s",
+                    cmd_id, params.get("method"), latency, params.get("channel_state"),
+                )
+                return
+            if method == "bridge.sw_response_sent":
+                params = msg.get("params") or {}
+                cmd_id = params.get("id")
+                send_ts = self._cmd_send_ts.get(cmd_id) if cmd_id is not None else None
+                latency = int(time.time() * 1000 - send_ts) if send_ts is not None else -1
+                bridge_probe.info(
+                    "bridge.sw_response_sent id=%s latency_offscreen_roundtrip=%dms",
+                    cmd_id, latency,
+                )
+                return
             msg_id = msg.get("id")
             if msg_id is not None and msg_id in self._cmd_pending:
+                self._cmd_send_ts.pop(msg_id, None)
                 fut = self._cmd_pending.pop(msg_id)
                 if "error" in msg:
                     err = msg["error"]
@@ -177,6 +223,20 @@ class RTCTransport:
                     ))
                 else:
                     fut.set_result(msg.get("result"))
+
+        @channel.on("message")
+        def on_message(data: str | bytes) -> None:
+            try:
+                msg = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                return
+
+            chunk_meta = msg.get("chunk")
+            if chunk_meta is not None:
+                _process_chunk(msg)
+                return
+
+            _dispatch_response(msg)
 
     async def _gather_ice(self) -> None:
         ice_done = asyncio.Event()
