@@ -1,58 +1,31 @@
-from .chat_direct import ChatClient
-from .client import Browser
-from .humanize import HumanProfile, Humanizer
-from .errors import (
-    AuthError,
-    CekiBrowserError,
-    CommandTimeout,
-    HumanActionDeclined,
-    HumanActionTimeout,
-    NavigationTimeout,
-    NoMatchError,
-    ProviderDisconnected,
-    ProviderNotVerified,
-    RateLimited,
-    SessionEndedError,
+from ._browser import Browser
+from ._client import Client
+from ._connect import connect
+from ._exceptions import (
+    AuthFailed,
+    CdpUnrecoverable,
+    CekiError,
+    ConnectionLost,
+    InsufficientFunds,
+    RateLimitExceeded,
+    SessionEnded,
 )
-from .chat import ChatAPI
-from .session import Session
-from .transport_rtc import RTCTransport
-from .types import (
-    ChatMessage,
-    HtmlResult,
-    HumanActionResult,
-    NavigateResult,
-    QueryResult,
-    ScreenshotResult,
-    TypingEvent,
-)
+from ._models import BrowserOption, ChatMessage, Match, ReadReceipt
 
+__version__ = "2.0.0"
 __all__ = [
+    "connect",
+    "Client",
     "Browser",
-    "ChatAPI",
-    "ChatClient",
-    "HumanProfile",
-    "Humanizer",
-    "Session",
-    "RTCTransport",
-    "AuthError",
-    "CekiBrowserError",
-    "CommandTimeout",
-    "HumanActionDeclined",
-    "HumanActionTimeout",
-    "NavigationTimeout",
-    "ProviderDisconnected",
-    "ProviderNotVerified",
-    "NoMatchError",
-    "RateLimited",
-    "SessionEndedError",
+    "BrowserOption",
+    "Match",
     "ChatMessage",
-    "HtmlResult",
-    "HumanActionResult",
-    "NavigateResult",
-    "QueryResult",
-    "ScreenshotResult",
-    "TypingEvent",
+    "ReadReceipt",
+    "RateLimitExceeded",
+    "InsufficientFunds",
+    "SessionEnded",
+    "CdpUnrecoverable",
+    "AuthFailed",
+    "ConnectionLost",
+    "CekiError",
 ]
-
-__version__ = "0.3.0"
