@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 
 import pytest
 
 from ceki_browser import connect
-from ceki_browser._exceptions import ConnectionLost
 
 from .conftest import MockRelayServer
 
@@ -47,7 +45,6 @@ async def test_no_reconnect_when_disabled(mock_relay: MockRelayServer) -> None:
 
 @pytest.mark.asyncio
 async def test_heartbeat_pong_updates_timestamp(mock_relay: MockRelayServer) -> None:
-    import time
 
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", relay_url=url)

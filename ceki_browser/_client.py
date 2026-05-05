@@ -104,7 +104,7 @@ class Client:
         except asyncio.TimeoutError:
             self._pending_rents.pop(event_id, None)
             raise TimeoutError("rent timed out waiting for match")
-        browser = Browser(client=self, match=match)
+        browser = Browser(client=self, match=match, event_id=event_id)
         self._active_browsers[match.session_id] = browser
         return browser
 
@@ -183,28 +183,50 @@ class Client:
             session_id = msg.get("session_id", "")
             browser = self._active_browsers.get(session_id)
             if browser:
-                browser._on_cdp_response(msg)
+                await browser._on_cdp_response(msg)
             return
         if mtype == "cdp_event":
             session_id = msg.get("session_id", "")
             browser = self._active_browsers.get(session_id)
             if browser:
-                browser._on_cdp_event(msg)
+                await browser._on_cdp_event(msg)
             return
         if mtype == "tab_opened":
             session_id = msg.get("session_id", "")
             browser = self._active_browsers.get(session_id)
             if browser:
-                browser._on_tab_opened(msg)
+                await browser._on_tab_opened(msg)
             return
         if mtype in ("session.ended", "session_end"):
             session_id = msg.get("session_id", "")
-            browser = self._active_browsers.pop(session_id, None)
+            browser = self._active_browsers.get(session_id)
             if browser:
-                browser._on_session_ended(msg)
+                await browser._on_session_ended(msg)
+            return
+        if mtype == "chat.message":
+            session_id = msg.get("session_id", "")
+            browser = self._active_browsers.get(session_id)
+            if browser:
+                await browser.chat._on_message(msg.get("payload", msg))
+            return
+        if mtype == "chat.read":
+            session_id = msg.get("session_id", "")
+            browser = self._active_browsers.get(session_id)
+            if browser:
+                await browser.chat._on_read(msg.get("payload", msg))
+            return
+        if mtype == "chat.send_ack":
+            session_id = msg.get("session_id", "")
+            browser = self._active_browsers.get(session_id)
+            if browser:
+                await browser.chat._on_send_ack(msg)
             return
         if mtype == "error":
-            self._handle_error(msg)
+            session_id = msg.get("session_id")
+            if session_id and session_id in self._active_browsers:
+                await self._active_browsers[session_id]._on_error(msg)
+            else:
+                self._handle_error(msg)
             return
 
     def _handle_error(self, msg: dict[str, Any]) -> None:
@@ -242,7 +264,7 @@ class Client:
             try:
                 self._ws = await websockets.connect(
                     self.relay_url,
-                    subprotocols=[f"bearer.{self.api_key}"],  # type: ignore[arg-type]
+                    subprotocols=[f"bearer.{self.api_key}"],  # type: ignore[arg-type,list-item]
                     open_timeout=20,
                 )
                 self._last_pong = time.monotonic()

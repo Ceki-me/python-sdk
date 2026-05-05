@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from ceki_browser import Client, connect
-from ceki_browser._exceptions import AuthFailed
 
 from .conftest import MockRelayServer
 
