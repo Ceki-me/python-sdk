@@ -1,7 +1,7 @@
 import os
 
-RELAY_URL_PROD = "wss://relay.ceki.me/ws/agent"
-RELAY_URL_DEV = "wss://relay.ittribe.org/ws/agent"
+RELAY_URL_PROD = "wss://browser.ceki.me/ws/agent"
+RELAY_URL_DEV = "wss://browser.ittribe.org/ws/agent"
 
 
 def default_relay_url() -> str:
