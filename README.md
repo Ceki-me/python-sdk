@@ -67,6 +67,20 @@ Close all sessions and the connection.
 
 The relay maintains the CDP connection to the incognito browser tab. If the connection drops, it automatically reattaches with 1s/2s/4s exponential backoff. Commands during reattach are buffered (FIFO, max 50). If 3 reattach attempts fail, a new fallback tab is created. If that also fails, `cdp_unrecoverable` error is sent.
 
+## Real-signup examples
+
+See `examples/SMOKE.md` for full runbook.
+
+Quick:
+```bash
+pip install -e ".[dev]"
+export CEKI_API_KEY=...
+export SCHEDULE_ID=...
+python examples/reddit_signup.py
+```
+
+These are NOT automated tests — they require a live relay, an online provider, and a real IMAP mailbox. Run manually as part of Phase 2 acceptance.
+
 ## Development
 
 ```bash
