@@ -13,16 +13,16 @@ async def browser_fixture(mock_relay):
 
     async def ack_rent():
         await asyncio.sleep(0.05)
-        rent = next((m for m in mock_relay.received if m.get("type") == "rent"), None)
-        if rent:
-            await mock_relay.send_to_all({
-                "type": "match",
-                "event_id": rent["event_id"],
-                "session_id": "sess-tab",
-                "schedule_id": 1,
-                "chat_topic_id": None,
-                "browser_info": {},
-            })
+        await mock_relay.send_to_all({"type": "rent_pending", "event_id": "ev-tab", "schedule_id": 1})
+        await asyncio.sleep(0.02)
+        await mock_relay.send_to_all({
+            "type": "match",
+            "event_id": "ev-tab",
+            "session_id": "sess-tab",
+            "schedule_id": 1,
+            "chat_topic_id": None,
+            "browser_info": {},
+        })
 
     t = asyncio.create_task(ack_rent())
     browser = await client.rent(1)

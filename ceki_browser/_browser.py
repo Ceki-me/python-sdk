@@ -23,10 +23,9 @@ _ERROR_TERMINAL = {-1011, -1012, -1015, -1018}
 
 
 class Browser:
-    def __init__(self, client: "Client", match: Match, event_id: str) -> None:
+    def __init__(self, client: "Client", match: Match) -> None:
         self._client = client
         self._match = match
-        self._event_id = event_id
         self._cdp_counter = 0
         self._pending_cdp: dict[int, asyncio.Future[Any]] = {}
         self._event_callbacks: list[EventCallback] = []

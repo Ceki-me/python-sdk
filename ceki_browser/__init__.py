@@ -12,7 +12,7 @@ from ._exceptions import (
 )
 from ._models import BrowserOption, ChatMessage, Match, ReadReceipt
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 __all__ = [
     "connect",
     "Client",

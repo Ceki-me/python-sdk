@@ -44,9 +44,9 @@ Establish a WebSocket connection to the relay. Returns a `Client` instance.
 
 Search for available browsers. Filters: `geo`, `language`, etc.
 
-### `client.rent(schedule_id, duration_minutes=60) -> Browser`
+### `client.rent(schedule_id) -> Browser`
 
-Rent a browser. Waits up to 60s for a match.
+Rent a browser by schedule ID. Waits up to 60s for a match.
 
 ### `client.close()`
 

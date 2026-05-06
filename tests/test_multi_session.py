@@ -19,14 +19,17 @@ async def test_two_sessions_routed_independently(mock_relay):
             rent = next(
                 (m for m in mock_relay.received
                  if m.get("type") == "rent" and m.get("schedule_id") == schedule_id
-                 and m.get("event_id") not in acked),
+                 and schedule_id not in acked),
                 None,
             )
             if rent:
-                acked.add(rent["event_id"])
+                acked.add(schedule_id)
+                ev_id = f"ev-{session_id}"
+                await mock_relay.send_to_all({"type": "rent_pending", "event_id": ev_id, "schedule_id": schedule_id})
+                await asyncio.sleep(0.02)
                 await mock_relay.send_to_all({
                     "type": "match",
-                    "event_id": rent["event_id"],
+                    "event_id": ev_id,
                     "session_id": session_id,
                     "schedule_id": schedule_id,
                     "chat_topic_id": None,
@@ -88,16 +91,17 @@ async def test_close_one_session_leaves_other_alive(mock_relay):
 
     async def ack_rent(session_id):
         await asyncio.sleep(0.05)
-        rent_msg = next((m for m in reversed(mock_relay.received) if m.get("type") == "rent"), None)
-        if rent_msg:
-            await mock_relay.send_to_all({
-                "type": "match",
-                "event_id": rent_msg["event_id"],
-                "session_id": session_id,
-                "schedule_id": 1,
-                "chat_topic_id": None,
-                "browser_info": {},
-            })
+        ev_id = f"ev-{session_id}"
+        await mock_relay.send_to_all({"type": "rent_pending", "event_id": ev_id, "schedule_id": 1})
+        await asyncio.sleep(0.02)
+        await mock_relay.send_to_all({
+            "type": "match",
+            "event_id": ev_id,
+            "session_id": session_id,
+            "schedule_id": 1,
+            "chat_topic_id": None,
+            "browser_info": {},
+        })
 
     t1 = asyncio.create_task(ack_rent("sess-A"))
     b1 = await client.rent(1)

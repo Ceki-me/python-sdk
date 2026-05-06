@@ -19,15 +19,11 @@ async def browser_and_relay(mock_relay):
 
     async def ack_rent():
         await asyncio.sleep(0.05)
-        for msg in mock_relay.received:
-            if msg.get("type") == "rent":
-                event_id = msg["event_id"]
-                break
-        else:
-            event_id = "ev-1"
+        await mock_relay.send_to_all({"type": "rent_pending", "event_id": "ev-1", "schedule_id": 1})
+        await asyncio.sleep(0.02)
         await mock_relay.send_to_all({
             "type": "match",
-            "event_id": event_id,
+            "event_id": "ev-1",
             "session_id": "sess-err",
             "schedule_id": 1,
             "chat_topic_id": None,

@@ -14,16 +14,16 @@ async def chat_browser(mock_relay):
 
     async def ack_rent():
         await asyncio.sleep(0.05)
-        rent = next((m for m in mock_relay.received if m.get("type") == "rent"), None)
-        if rent:
-            await mock_relay.send_to_all({
-                "type": "match",
-                "event_id": rent["event_id"],
-                "session_id": "sess-chat",
-                "schedule_id": 1,
-                "chat_topic_id": 77,
-                "browser_info": {},
-            })
+        await mock_relay.send_to_all({"type": "rent_pending", "event_id": "ev-chat", "schedule_id": 1})
+        await asyncio.sleep(0.02)
+        await mock_relay.send_to_all({
+            "type": "match",
+            "event_id": "ev-chat",
+            "session_id": "sess-chat",
+            "schedule_id": 1,
+            "chat_topic_id": 77,
+            "browser_info": {},
+        })
 
     t = asyncio.create_task(ack_rent())
     browser = await client.rent(1)
@@ -38,16 +38,16 @@ async def chat_browser_no_topic(mock_relay):
 
     async def ack_rent():
         await asyncio.sleep(0.05)
-        rent = next((m for m in mock_relay.received if m.get("type") == "rent"), None)
-        if rent:
-            await mock_relay.send_to_all({
-                "type": "match",
-                "event_id": rent["event_id"],
-                "session_id": "sess-notopic",
-                "schedule_id": 1,
-                "chat_topic_id": None,
-                "browser_info": {},
-            })
+        await mock_relay.send_to_all({"type": "rent_pending", "event_id": "ev-notopic", "schedule_id": 1})
+        await asyncio.sleep(0.02)
+        await mock_relay.send_to_all({
+            "type": "match",
+            "event_id": "ev-notopic",
+            "session_id": "sess-notopic",
+            "schedule_id": 1,
+            "chat_topic_id": None,
+            "browser_info": {},
+        })
 
     t = asyncio.create_task(ack_rent())
     browser = await client.rent(1)

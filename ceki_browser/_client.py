@@ -38,6 +38,7 @@ class Client:
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._reader_task: asyncio.Task[None] | None = None
         self._pending_rents: dict[str, asyncio.Future[Match]] = {}
+        self._pending_rent_queue: list[asyncio.Future[Match]] = []
         self._active_browsers: dict[str, Browser] = {}
         self._backoff_attempt = 0
         self._last_pong = 0.0
@@ -85,26 +86,19 @@ class Client:
         items = data.get("data", data) if isinstance(data, dict) else data
         return [BrowserOption.model_validate(x) for x in items]
 
-    async def rent(self, schedule_id: int, duration_minutes: int = 60) -> Browser:
-        import uuid
-
-        event_id = uuid.uuid4().hex
+    async def rent(self, schedule_id: int) -> Browser:
         fut: asyncio.Future[Match] = asyncio.get_event_loop().create_future()
-        self._pending_rents[event_id] = fut
-        await self._ws_send(
-            {
-                "type": "rent",
-                "event_id": event_id,
-                "schedule_id": schedule_id,
-                "duration_minutes": duration_minutes,
-            }
-        )
+        self._pending_rent_queue.append(fut)
+        await self._ws_send({"type": "rent", "schedule_id": schedule_id})
         try:
             match = await asyncio.wait_for(fut, timeout=60)
         except asyncio.TimeoutError:
-            self._pending_rents.pop(event_id, None)
+            try:
+                self._pending_rent_queue.remove(fut)
+            except ValueError:
+                pass
             raise TimeoutError("rent timed out waiting for match")
-        browser = Browser(client=self, match=match, event_id=event_id)
+        browser = Browser(client=self, match=match)
         self._active_browsers[match.session_id] = browser
         return browser
 
@@ -171,13 +165,18 @@ class Client:
         if mtype == "pong":
             self._last_pong = time.monotonic()
             return
-        if mtype == "match":
-            event_id = msg.get("event_id", "")
-            if event_id in self._pending_rents:
-                fut = self._pending_rents.pop(event_id)
-                match = Match.model_validate(msg)
+        if mtype == "rent_pending":
+            server_event_id = msg.get("event_id")
+            if self._pending_rent_queue and server_event_id:
+                fut = self._pending_rent_queue.pop(0)
                 if not fut.done():
-                    fut.set_result(match)
+                    self._pending_rents[str(server_event_id)] = fut
+            return
+        if mtype == "match":
+            server_event_id = str(msg.get("event_id", ""))
+            fut = self._pending_rents.pop(server_event_id, None)
+            if fut and not fut.done():
+                fut.set_result(Match.model_validate(msg))
             return
         if mtype == "cdp_response":
             session_id = msg.get("session_id", "")
@@ -231,7 +230,7 @@ class Client:
 
     def _handle_error(self, msg: dict[str, Any]) -> None:
         code = msg.get("code", 0)
-        event_id = msg.get("event_id")
+        server_event_id = msg.get("event_id")
         if code == -1013:
             exc: Exception = RateLimitExceeded(retry_after=float(msg.get("retry_after", 1.0)))
         elif code == -1012:
@@ -243,14 +242,26 @@ class Client:
         else:
             exc = Exception(f"relay error {code}: {msg.get('message')}")
 
-        if event_id and event_id in self._pending_rents:
-            fut = self._pending_rents.pop(event_id)
+        if server_event_id:
+            fut = self._pending_rents.pop(str(server_event_id), None)
+            if fut and not fut.done():
+                fut.set_exception(exc)
+                return
+
+        # Early error before rent_pending (e.g. -1014 rent failed, -1013 rate limit)
+        if self._pending_rent_queue:
+            fut = self._pending_rent_queue.pop(0)
             if not fut.done():
                 fut.set_exception(exc)
-        else:
-            log.error("unhandled relay error: %s", msg)
+                return
+
+        log.error("unhandled relay error: %s", msg)
 
     def _fail_pending(self, exc: Exception) -> None:
+        for fut in list(self._pending_rent_queue):
+            if not fut.done():
+                fut.set_exception(exc)
+        self._pending_rent_queue.clear()
         for fut in list(self._pending_rents.values()):
             if not fut.done():
                 fut.set_exception(exc)
@@ -273,19 +284,6 @@ class Client:
                 )
                 self._reader_task = asyncio.create_task(self._reader_loop(), name="reader")
                 log.info("reconnected successfully")
-                # Re-subscribe active sessions
-                for browser in self._active_browsers.values():
-                    try:
-                        await self._ws_send(
-                            {
-                                "type": "rent",
-                                "event_id": browser._match.event_id or browser.session_id,
-                                "schedule_id": browser.schedule_id,
-                                "duration_minutes": 60,
-                            }
-                        )
-                    except Exception:
-                        pass
                 return
             except Exception as exc:
                 log.warning("reconnect attempt %d failed: %s", attempt + 1, exc)
