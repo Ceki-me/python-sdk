@@ -4,28 +4,26 @@ import asyncio
 
 import pytest
 
-from ceki_browser import connect
+from ceki_browser import ConnectOptions, connect
 
 
 @pytest.fixture
 async def connected_client(mock_relay):
-    client = await connect("test-key", relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent")
+    client = await connect("test-key", ConnectOptions(relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent"))
     yield client, mock_relay
     await client.close()
 
 
 async def _do_rent(client, mock_relay, session_id="sess-1", schedule_id=42):
+    server_event_id = "ev-test-1"
+
     async def ack_rent():
         await asyncio.sleep(0.05)
-        for msg in mock_relay.received:
-            if msg.get("type") == "rent":
-                event_id = msg["event_id"]
-                break
-        else:
-            event_id = "unknown"
+        await mock_relay.send_to_all({"type": "rent_pending", "event_id": server_event_id})
+        await asyncio.sleep(0.05)
         await mock_relay.send_to_all({
             "type": "match",
-            "event_id": event_id,
+            "event_id": server_event_id,
             "session_id": session_id,
             "schedule_id": schedule_id,
             "chat_topic_id": None,

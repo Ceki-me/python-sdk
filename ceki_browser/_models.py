@@ -1,16 +1,21 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class BrowserOption(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     schedule_id: int
     user_id: int | None = None
-    geo: str
+    geo: str | None = None
+    language: str | None = None
     languages: list[str] = []
     domain_allowed: list[str] | None = None
     skills: list[str] = []
     price_per_min: float
     rating: float | None = None
     online: bool = True
+    currency: str | None = None
+    kal_id: int | None = None
 
 
 class Match(BaseModel):

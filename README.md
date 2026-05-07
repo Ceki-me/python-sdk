@@ -13,7 +13,7 @@ pip install ceki-browser
 ```python
 import asyncio
 import os
-from ceki_browser import connect
+from ceki_browser import connect, ConnectOptions
 
 async def main():
     client = await connect(os.environ["CEKI_API_KEY"])
@@ -26,19 +26,43 @@ async def main():
 asyncio.run(main())
 ```
 
+Dev / staging with basic-auth:
+
+```python
+client = await connect(
+    os.environ["CEKI_API_KEY"],
+    ConnectOptions(
+        api_url="https://clawapi.ittribe.org",
+        relay_url="wss://browser.ittribe.org/ws/agent",
+        basic_auth=("admin", "clawdev"),
+    ),
+)
+```
+
+**BREAKING in 2.2.0:** `connect()` no longer accepts `relay_url=` or `reconnect=` kwargs — pass a `ConnectOptions` object instead.
+
 ## Environment Variables
 
 | Variable | Description |
 |---|---|
 | `CEKI_API_KEY` | Your API key (required) |
+| `CEKI_API_URL` | Override REST API base URL |
 | `CEKI_RELAY_URL` | Override relay WebSocket URL |
-| `CEKI_ENV` | Set to `dev` to use dev relay |
 
 ## API
 
-### `connect(api_key, *, reconnect=True, relay_url=None) -> Client`
+### `connect(api_key, options: ConnectOptions | None = None) -> Client`
 
 Establish a WebSocket connection to the relay. Returns a `Client` instance.
+
+### `ConnectOptions`
+
+| Field | Default | Description |
+|---|---|---|
+| `api_url` | `https://api.ceki.me` | REST API base URL |
+| `relay_url` | `wss://browser.ceki.me/ws/agent` | Relay WebSocket URL |
+| `basic_auth` | `None` | `(user, password)` for nginx htpasswd |
+| `reconnect` | `True` | Auto-reconnect on disconnect |
 
 ### `client.search(filters=None, limit=20) -> list[BrowserOption]`
 

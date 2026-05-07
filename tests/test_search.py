@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from ceki_browser import BrowserOption, connect
+from ceki_browser import BrowserOption, ConnectOptions, connect
 from ceki_browser._client import Client
 
 from .conftest import MockRelayServer
@@ -17,18 +17,12 @@ def _make_response(data: dict | list) -> httpx.Response:
 
 
 def _make_client(relay_url: str = "wss://relay.ceki.me/ws/agent") -> Client:
-    return Client(api_key="testkey", relay_url=relay_url, reconnect=False)
-
-
-@pytest.mark.asyncio
-async def test_search_url_derived_from_relay() -> None:
-    client = _make_client("wss://relay.ceki.me/ws/agent")
-    base = (
-        client.relay_url.replace("wss://", "https://")
-        .replace("ws://", "http://")
-        .replace("/ws/agent", "")
+    return Client(
+        api_key="testkey",
+        relay_url=relay_url,
+        api_url="https://api.ceki.me",
+        reconnect=False,
     )
-    assert base == "https://relay.ceki.me"
 
 
 @pytest.mark.asyncio
@@ -43,7 +37,7 @@ async def test_search_returns_browser_options(mock_relay: MockRelayServer) -> No
 
     with patch("httpx.AsyncClient.get", AsyncMock(return_value=mock_resp)):
         url = f"ws://127.0.0.1:{mock_relay.port}"
-        client = await connect("testkey", relay_url=url)
+        client = await connect("testkey", ConnectOptions(relay_url=url))
         results = await client.search({"geo": "US"}, limit=5)
         assert len(results) == 1
         assert isinstance(results[0], BrowserOption)
@@ -53,13 +47,32 @@ async def test_search_returns_browser_options(mock_relay: MockRelayServer) -> No
 
 
 @pytest.mark.asyncio
+async def test_search_uses_plural_browsers_endpoint(mock_relay: MockRelayServer) -> None:
+    mock_resp = _make_response({"data": []})
+    mock_get = AsyncMock(return_value=mock_resp)
+
+    with patch("httpx.AsyncClient.get", mock_get):
+        url = f"ws://127.0.0.1:{mock_relay.port}"
+        client = await connect(
+            "testkey",
+            ConnectOptions(relay_url=url, api_url="https://clawapi.ittribe.org"),
+        )
+        await client.search()
+        await client.close()
+
+    call_args = mock_get.call_args
+    called_url = call_args.args[0] if call_args.args else call_args.kwargs.get("url", "")
+    assert "/api/browsers/search" in called_url
+
+
+@pytest.mark.asyncio
 async def test_search_filters_passed_as_params(mock_relay: MockRelayServer) -> None:
     mock_resp = _make_response({"data": []})
     mock_get = AsyncMock(return_value=mock_resp)
 
     with patch("httpx.AsyncClient.get", mock_get):
         url = f"ws://127.0.0.1:{mock_relay.port}"
-        client = await connect("testkey", relay_url=url)
+        client = await connect("testkey", ConnectOptions(relay_url=url))
         await client.search({"geo": "DE", "language": "de"}, limit=10)
         await client.close()
 
@@ -76,9 +89,38 @@ async def test_search_bearer_auth_header(mock_relay: MockRelayServer) -> None:
 
     with patch("httpx.AsyncClient.get", mock_get):
         url = f"ws://127.0.0.1:{mock_relay.port}"
-        client = await connect("my-secret-key", relay_url=url)
+        client = await connect("my-secret-key", ConnectOptions(relay_url=url))
         await client.search()
         await client.close()
 
     headers = mock_get.call_args.kwargs.get("headers", {})
     assert headers.get("Authorization") == "Bearer my-secret-key"
+
+
+def test_browser_option_laravel_response() -> None:
+    raw = {
+        "schedule_id": 42,
+        "geo": None,
+        "language": "en",
+        "skills": ["form-fill"],
+        "price_per_min": 0.03,
+        "currency": "USD",
+        "kal_id": 7,
+        "rating": 4.5,
+    }
+    opt = BrowserOption.model_validate(raw)
+    assert opt.schedule_id == 42
+    assert opt.geo is None
+    assert opt.language == "en"
+    assert opt.currency == "USD"
+    assert opt.kal_id == 7
+
+
+def test_browser_option_ignores_extra_fields() -> None:
+    raw = {
+        "schedule_id": 1,
+        "price_per_min": 0.05,
+        "unknown_field": "ignored",
+    }
+    opt = BrowserOption.model_validate(raw)
+    assert opt.schedule_id == 1

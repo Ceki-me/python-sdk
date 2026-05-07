@@ -5,7 +5,7 @@ import base64
 
 import pytest
 
-from ceki_browser import connect
+from ceki_browser import ConnectOptions, connect
 from ceki_browser._chat import MAX_IMAGE_BYTES
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
@@ -15,20 +15,21 @@ WEBP_MAGIC = b"RIFF\x00\x00\x00\x00WEBP" + b"\x00" * 100
 
 @pytest.fixture
 async def chat_browser(mock_relay, tmp_path):
-    client = await connect("test-key", relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent")
+    client = await connect("test-key", ConnectOptions(relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent"))
 
     async def ack_rent():
+        server_ev = "ev-test-1"
         await asyncio.sleep(0.05)
-        rent = next((m for m in mock_relay.received if m.get("type") == "rent"), None)
-        if rent:
-            await mock_relay.send_to_all({
-                "type": "match",
-                "event_id": rent["event_id"],
-                "session_id": "sess-img",
-                "schedule_id": 1,
-                "chat_topic_id": 88,
-                "browser_info": {},
-            })
+        await mock_relay.send_to_all({"type": "rent_pending", "event_id": server_ev})
+        await asyncio.sleep(0.05)
+        await mock_relay.send_to_all({
+            "type": "match",
+            "event_id": server_ev,
+            "session_id": "sess-img",
+            "schedule_id": 1,
+            "chat_topic_id": 88,
+            "browser_info": {},
+        })
 
     t = asyncio.create_task(ack_rent())
     browser = await client.rent(1)

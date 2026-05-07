@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from ceki_browser import connect
+from ceki_browser import ConnectOptions, connect
 
 from .conftest import MockRelayServer
 
@@ -12,7 +12,7 @@ from .conftest import MockRelayServer
 @pytest.mark.asyncio
 async def test_reconnect_after_drop(mock_relay: MockRelayServer) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
-    client = await connect("testkey", relay_url=url, reconnect=True)
+    client = await connect("testkey", ConnectOptions(relay_url=url, reconnect=True))
 
     initial_ws = client._ws
     assert initial_ws is not None
@@ -32,7 +32,7 @@ async def test_reconnect_after_drop(mock_relay: MockRelayServer) -> None:
 @pytest.mark.asyncio
 async def test_no_reconnect_when_disabled(mock_relay: MockRelayServer) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
-    client = await connect("testkey", relay_url=url, reconnect=False)
+    client = await connect("testkey", ConnectOptions(relay_url=url, reconnect=False))
 
     # Drop from server
     for ws in list(mock_relay.connections):
@@ -47,7 +47,7 @@ async def test_no_reconnect_when_disabled(mock_relay: MockRelayServer) -> None:
 async def test_heartbeat_pong_updates_timestamp(mock_relay: MockRelayServer) -> None:
 
     url = f"ws://127.0.0.1:{mock_relay.port}"
-    client = await connect("testkey", relay_url=url)
+    client = await connect("testkey", ConnectOptions(relay_url=url))
 
     before = client._last_pong
     # Send ping manually and verify pong updates timestamp

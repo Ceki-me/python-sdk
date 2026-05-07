@@ -1,6 +1,6 @@
 from ._browser import Browser
 from ._client import Client
-from ._connect import connect
+from ._connect import ConnectOptions, connect
 from ._exceptions import (
     AuthFailed,
     CdpUnrecoverable,
@@ -12,9 +12,10 @@ from ._exceptions import (
 )
 from ._models import BrowserOption, ChatMessage, Match, ReadReceipt
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 __all__ = [
     "connect",
+    "ConnectOptions",
     "Client",
     "Browser",
     "BrowserOption",

@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from ceki_browser import Client, connect
+from ceki_browser import Client, ConnectOptions, connect
 from ceki_browser._exceptions import (
     RateLimitExceeded,
     SessionEnded,
@@ -16,7 +16,7 @@ from .conftest import MockRelayServer
 @pytest.mark.asyncio
 async def test_rent_resolves_via_rent_pending_then_match(mock_relay: MockRelayServer) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
-    client = await connect("testkey", relay_url=url)
+    client = await connect("testkey", ConnectOptions(relay_url=url))
 
     rent_task = asyncio.create_task(client.rent(schedule_id=240))
     await asyncio.sleep(0.05)
@@ -51,7 +51,7 @@ async def test_rent_resolves_via_rent_pending_then_match(mock_relay: MockRelaySe
 @pytest.mark.asyncio
 async def test_rent_error_with_event_id_raises_exception(mock_relay: MockRelayServer) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
-    client = await connect("testkey", relay_url=url)
+    client = await connect("testkey", ConnectOptions(relay_url=url))
 
     rent_task = asyncio.create_task(client.rent(schedule_id=240))
     await asyncio.sleep(0.05)
@@ -76,7 +76,7 @@ async def test_rent_error_with_event_id_raises_exception(mock_relay: MockRelaySe
 @pytest.mark.asyncio
 async def test_rent_early_error_without_event_id_raises_exception(mock_relay: MockRelayServer) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
-    client = await connect("testkey", relay_url=url)
+    client = await connect("testkey", ConnectOptions(relay_url=url))
 
     rent_task = asyncio.create_task(client.rent(schedule_id=240))
     await asyncio.sleep(0.05)

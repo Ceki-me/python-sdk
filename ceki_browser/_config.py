@@ -1,12 +1,12 @@
 import os
 
-RELAY_URL_PROD = "wss://browser.ceki.me/ws/agent"
-RELAY_URL_DEV = "wss://browser.ittribe.org/ws/agent"
+DEFAULT_API_URL   = "https://api.ceki.me"
+DEFAULT_RELAY_URL = "wss://browser.ceki.me/ws/agent"
+
+
+def default_api_url() -> str:
+    return os.getenv("CEKI_API_URL") or DEFAULT_API_URL
 
 
 def default_relay_url() -> str:
-    if url := os.getenv("CEKI_RELAY_URL"):
-        return url
-    if os.getenv("CEKI_ENV", "").lower() == "dev":
-        return RELAY_URL_DEV
-    return RELAY_URL_PROD
+    return os.getenv("CEKI_RELAY_URL") or DEFAULT_RELAY_URL

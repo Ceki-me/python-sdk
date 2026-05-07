@@ -4,13 +4,13 @@ import asyncio
 
 import pytest
 
-from ceki_browser import connect
+from ceki_browser import ConnectOptions, connect
 from ceki_browser._models import ChatMessage, ReadReceipt
 
 
 @pytest.fixture
 async def chat_browser(mock_relay):
-    client = await connect("test-key", relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent")
+    client = await connect("test-key", ConnectOptions(relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent"))
 
     async def ack_rent():
         await asyncio.sleep(0.05)
@@ -34,7 +34,7 @@ async def chat_browser(mock_relay):
 
 @pytest.fixture
 async def chat_browser_no_topic(mock_relay):
-    client = await connect("test-key", relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent")
+    client = await connect("test-key", ConnectOptions(relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent"))
 
     async def ack_rent():
         await asyncio.sleep(0.05)

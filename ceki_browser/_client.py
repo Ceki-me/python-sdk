@@ -30,10 +30,19 @@ HEARTBEAT_TIMEOUT = 90.0
 
 
 class Client:
-    def __init__(self, api_key: str, relay_url: str, reconnect: bool = True) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        relay_url: str,
+        api_url: str,
+        reconnect: bool = True,
+        basic_auth: tuple[str, str] | None = None,
+    ) -> None:
         self.api_key = api_key
         self.relay_url = relay_url
+        self.api_url = api_url
         self.reconnect = reconnect
+        self._basic_auth = basic_auth
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._reader_task: asyncio.Task[None] | None = None
@@ -44,12 +53,23 @@ class Client:
         self._last_pong = 0.0
         self._closed = False
 
+    def _ws_extra_headers(self) -> dict[str, str]:
+        if not self._basic_auth:
+            return {}
+        import base64
+        creds = base64.b64encode(
+            f"{self._basic_auth[0]}:{self._basic_auth[1]}".encode()
+        ).decode()
+        return {"Authorization": f"Basic {creds}"}
+
     async def _connect(self) -> None:
         subprotocols = [f"bearer.{self.api_key}"]
+        extra_headers = self._ws_extra_headers()
         try:
             self._ws = await websockets.connect(
                 self.relay_url,
                 subprotocols=subprotocols,  # type: ignore[arg-type]
+                extra_headers=extra_headers,
                 open_timeout=20,
             )
         except websockets.exceptions.InvalidStatusCode as exc:
@@ -68,14 +88,10 @@ class Client:
     async def search(
         self, filters: dict[str, Any] | None = None, limit: int = 20
     ) -> list[BrowserOption]:
-        base = (
-            self.relay_url.replace("wss://", "https://")
-            .replace("ws://", "http://")
-            .replace("/ws/agent", "")
-        )
-        url = f"{base}/api/browser/search"
+        url = f"{self.api_url}/api/browsers/search"
         params: dict[str, Any] = {"limit": limit, **(filters or {})}
-        async with httpx.AsyncClient() as http:
+        auth = httpx.BasicAuth(*self._basic_auth) if self._basic_auth else None
+        async with httpx.AsyncClient(auth=auth) as http:
             resp = await http.get(
                 url,
                 headers={"Authorization": f"Bearer {self.api_key}"},
@@ -276,6 +292,7 @@ class Client:
                 self._ws = await websockets.connect(
                     self.relay_url,
                     subprotocols=[f"bearer.{self.api_key}"],  # type: ignore[arg-type,list-item]
+                    extra_headers=self._ws_extra_headers(),
                     open_timeout=20,
                 )
                 self._last_pong = time.monotonic()

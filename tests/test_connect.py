@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ceki_browser import Client, connect
+from ceki_browser import Client, ConnectOptions, connect
 
 from .conftest import MockRelayServer
 
@@ -10,7 +10,7 @@ from .conftest import MockRelayServer
 @pytest.mark.asyncio
 async def test_connect_establishes_ws(mock_relay: MockRelayServer) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
-    client = await connect("testkey", relay_url=url)
+    client = await connect("testkey", ConnectOptions(relay_url=url))
     assert client._ws is not None
     assert not client._ws.closed
     await client.close()
@@ -19,7 +19,7 @@ async def test_connect_establishes_ws(mock_relay: MockRelayServer) -> None:
 @pytest.mark.asyncio
 async def test_connect_uses_bearer_subprotocol(mock_relay: MockRelayServer) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
-    client = await connect("my-api-key", relay_url=url)
+    client = await connect("my-api-key", ConnectOptions(relay_url=url))
     ws = client._ws
     assert ws is not None
     # Verify the client sent bearer subprotocol in the handshake
@@ -32,7 +32,7 @@ async def test_connect_uses_bearer_subprotocol(mock_relay: MockRelayServer) -> N
 @pytest.mark.asyncio
 async def test_close_cancels_tasks(mock_relay: MockRelayServer) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
-    client = await connect("testkey", relay_url=url)
+    client = await connect("testkey", ConnectOptions(relay_url=url))
     ht = client._heartbeat_task
     rt = client._reader_task
     assert ht is not None and rt is not None
@@ -43,6 +43,6 @@ async def test_close_cancels_tasks(mock_relay: MockRelayServer) -> None:
 @pytest.mark.asyncio
 async def test_client_is_client_instance(mock_relay: MockRelayServer) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
-    client = await connect("testkey", relay_url=url)
+    client = await connect("testkey", ConnectOptions(relay_url=url))
     assert isinstance(client, Client)
     await client.close()

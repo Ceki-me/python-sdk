@@ -4,12 +4,12 @@ import asyncio
 
 import pytest
 
-from ceki_browser import connect
+from ceki_browser import ConnectOptions, connect
 
 
 @pytest.mark.asyncio
 async def test_two_sessions_routed_independently(mock_relay):
-    client = await connect("test-key", relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent")
+    client = await connect("test-key", ConnectOptions(relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent"))
     acked: set[str] = set()
 
     async def ack_rent(session_id: str, schedule_id: int) -> None:
@@ -87,7 +87,7 @@ async def test_two_sessions_routed_independently(mock_relay):
 
 @pytest.mark.asyncio
 async def test_close_one_session_leaves_other_alive(mock_relay):
-    client = await connect("test-key", relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent")
+    client = await connect("test-key", ConnectOptions(relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent"))
 
     async def ack_rent(session_id):
         await asyncio.sleep(0.05)
