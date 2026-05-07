@@ -139,8 +139,12 @@ class BrowserChat:
         return [ChatMessage.model_validate(m) for m in items]
 
     async def _on_message(self, payload: dict) -> None:
+        raw = payload.get("message")
+        if not isinstance(raw, dict):
+            log.warning("chat.message without nested 'message': %s", payload)
+            return
         try:
-            msg = ChatMessage.model_validate(payload)
+            msg = ChatMessage.model_validate(raw)
         except Exception as exc:
             log.warning("invalid chat.message payload: %s", exc)
             return
