@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+import base64
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -124,3 +125,33 @@ def test_browser_option_ignores_extra_fields() -> None:
     }
     opt = BrowserOption.model_validate(raw)
     assert opt.schedule_id == 1
+
+
+@pytest.mark.asyncio
+async def test_rest_uses_bearer_only_even_with_basic_auth(mock_relay: MockRelayServer) -> None:
+    """basic_auth must not overwrite Bearer in REST Authorization header."""
+    mock_resp = _make_response({"data": []})
+    mock_get = AsyncMock(return_value=mock_resp)
+
+    with patch("httpx.AsyncClient.get", mock_get):
+        client = await connect(
+            "my-api-key",
+            ConnectOptions(relay_url=f"ws://127.0.0.1:{mock_relay.port}", basic_auth=("u", "p")),
+        )
+        await client.search()
+        await client.close()
+
+    headers = mock_get.call_args.kwargs.get("headers", {})
+    assert headers.get("Authorization") == "Bearer my-api-key"
+
+
+@pytest.mark.asyncio
+async def test_ws_uses_basic_auth_in_extra_headers(mock_relay: MockRelayServer) -> None:
+    """basic_auth must appear as Authorization: Basic in WS extra_headers."""
+    client = await connect(
+        "my-api-key",
+        ConnectOptions(relay_url=f"ws://127.0.0.1:{mock_relay.port}", basic_auth=("u", "p")),
+    )
+    expected = "Basic " + base64.b64encode(b"u:p").decode()
+    assert client._ws_extra_headers().get("Authorization") == expected
+    await client.close()

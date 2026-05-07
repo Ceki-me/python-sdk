@@ -90,8 +90,7 @@ class Client:
     ) -> list[BrowserOption]:
         url = f"{self.api_url}/api/browsers/search"
         params: dict[str, Any] = {"limit": limit, **(filters or {})}
-        auth = httpx.BasicAuth(*self._basic_auth) if self._basic_auth else None
-        async with httpx.AsyncClient(auth=auth) as http:
+        async with httpx.AsyncClient() as http:
             resp = await http.get(
                 url,
                 headers={"Authorization": f"Bearer {self.api_key}"},
