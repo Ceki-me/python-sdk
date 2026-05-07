@@ -53,6 +53,10 @@ class Browser:
     def browser_info(self) -> dict[str, Any]:
         return self._match.browser_info
 
+    @property
+    def provider_user_id(self) -> int | None:
+        return self._match.provider_user_id
+
     async def send(self, cdp: dict[str, Any], *, timeout: float = 60.0) -> dict[str, Any]:
         if self._ended.is_set():
             raise SessionEnded(self._ended_reason or "ended")

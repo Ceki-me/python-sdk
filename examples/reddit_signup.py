@@ -49,7 +49,9 @@ async def main() -> None:
     provider_replies: asyncio.Queue[str] = asyncio.Queue()
 
     async def on_chat(msg) -> None:
-        if msg.sender_type == "provider" and msg.text:
+        if msg.is_system():
+            return
+        if msg.is_from_provider(browser.provider_user_id) and msg.text:
             await provider_replies.put(msg.text)
 
     browser.chat.on_message(on_chat)

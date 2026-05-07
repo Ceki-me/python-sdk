@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class BrowserOption(BaseModel):
@@ -19,24 +19,40 @@ class BrowserOption(BaseModel):
 
 
 class Match(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+
     session_id: str
     schedule_id: int
     event_id: str | None = None
     chat_topic_id: str | None = None
+    provider_user_id: int | None = None
     started_at: float = 0.0
     browser_info: dict = {}
 
 
 class ChatMessage(BaseModel):
-    message_id: int
-    sender_type: str
-    sender_id: int
+    model_config = ConfigDict(populate_by_name=True, extra='ignore')
+
+    id: str = Field(alias='_id')
+    topic_id: str
+    sender_id: int | None = None
     text: str | None = None
-    image_url: str | None = None
-    sent_at: float
+    media: list[dict] | None = None
+    type: str = 'text'
+    created_at: str
+    edited_at: str | None = None
+    deleted_at: str | None = None
+
+    def is_system(self) -> bool:
+        return self.type == 'system'
+
+    def is_from_provider(self, provider_user_id: int | None) -> bool:
+        return provider_user_id is not None and self.sender_id == provider_user_id
 
 
 class ReadReceipt(BaseModel):
-    topic_id: int
-    last_read_message_id: int
-    read_at: float
+    model_config = ConfigDict(extra='ignore')
+
+    topic_id: str
+    last_read_message_id: str
+    read_at: float = 0.0

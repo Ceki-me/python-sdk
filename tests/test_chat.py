@@ -21,7 +21,7 @@ async def chat_browser(mock_relay):
             "event_id": "ev-chat",
             "session_id": "sess-chat",
             "schedule_id": 1,
-            "chat_topic_id": 77,
+            "chat_topic_id": "77",
             "browser_info": {},
         })
 
@@ -97,22 +97,30 @@ async def test_on_message_callback(chat_browser):
     await mock_relay.send_to_all({
         "type": "chat.message",
         "session_id": "sess-chat",
-        "payload": {
-            "message_id": 99,
-            "sender_type": "provider",
+        "topic_id": "77",
+        "message": {
+            "_id": "69fcbb000000000000000001",
+            "topic_id": "77",
             "sender_id": 7,
             "text": "captcha solved",
-            "image_url": None,
-            "sent_at": 1746441660.0,
+            "media": None,
+            "type": "text",
+            "created_at": "2026-05-07T10:00:00.000Z",
+            "edited_at": None,
+            "deleted_at": None,
         },
     })
 
     await asyncio.sleep(0.1)
 
     assert len(received) == 1
-    assert received[0].message_id == 99
-    assert received[0].sender_type == "provider"
+    assert received[0].id == "69fcbb000000000000000001"
+    assert received[0].sender_id == 7
     assert received[0].text == "captcha solved"
+    assert received[0].type == "text"
+    assert not received[0].is_system()
+    assert received[0].is_from_provider(7)
+    assert not received[0].is_from_provider(99)
 
 
 @pytest.mark.asyncio
@@ -130,8 +138,8 @@ async def test_on_read_callback(chat_browser):
         "type": "chat.read",
         "session_id": "sess-chat",
         "payload": {
-            "topic_id": 77,
-            "last_read_message_id": 42,
+            "topic_id": "77",
+            "last_read_message_id": "69fcbb000000000000000042",
             "read_at": 1746441720.0,
         },
     })
@@ -139,8 +147,8 @@ async def test_on_read_callback(chat_browser):
     await asyncio.sleep(0.1)
 
     assert len(receipts) == 1
-    assert receipts[0].last_read_message_id == 42
-    assert receipts[0].topic_id == 77
+    assert receipts[0].last_read_message_id == "69fcbb000000000000000042"
+    assert receipts[0].topic_id == "77"
 
 
 @pytest.mark.asyncio
@@ -149,3 +157,90 @@ async def test_send_without_topic_raises(chat_browser_no_topic):
 
     with pytest.raises(RuntimeError, match="chat topic not assigned"):
         await browser.chat.send("hello")
+
+
+# --- Unit tests for ChatMessage v2 schema and helpers ---
+
+def _make_msg(**kwargs):
+    base = {
+        "_id": "69fcbb000000000000000001",
+        "topic_id": "69fcbb000000000000000002",
+        "sender_id": 1,
+        "text": "hello",
+        "type": "text",
+        "created_at": "2026-05-07T10:00:00.000Z",
+    }
+    base.update(kwargs)
+    return ChatMessage.model_validate(base)
+
+
+def test_chatmessage_validates_real_payload():
+    msg = _make_msg(media=None, edited_at=None, deleted_at=None)
+    assert msg.id == "69fcbb000000000000000001"
+    assert msg.topic_id == "69fcbb000000000000000002"
+    assert msg.sender_id == 1
+    assert msg.text == "hello"
+    assert msg.type == "text"
+    assert msg.created_at == "2026-05-07T10:00:00.000Z"
+
+
+def test_chatmessage_type_system():
+    msg = _make_msg(type="system", text="[ext v0.6.63]\n[10:00:00][info] session start")
+    assert msg.is_system()
+    assert not msg.is_from_provider(None)
+    assert not msg.is_from_provider(99)
+
+
+def test_chatmessage_type_text_default():
+    base = {
+        "_id": "69fcbb000000000000000003",
+        "topic_id": "69fcbb000000000000000002",
+        "sender_id": 2,
+        "text": "hi",
+        "created_at": "2026-05-07T10:01:00.000Z",
+    }
+    msg = ChatMessage.model_validate(base)
+    assert msg.type == "text"
+    assert not msg.is_system()
+
+
+def test_chatmessage_is_from_provider():
+    msg = _make_msg(sender_id=5)
+    assert msg.is_from_provider(5)
+    assert not msg.is_from_provider(6)
+    assert not msg.is_from_provider(None)
+
+
+def test_chatmessage_extra_fields_ignored():
+    base = {
+        "_id": "69fcbb000000000000000004",
+        "topic_id": "69fcbb000000000000000002",
+        "sender_id": 1,
+        "text": "x",
+        "created_at": "2026-05-07T10:02:00.000Z",
+        "unknown_future_field": "value",
+    }
+    msg = ChatMessage.model_validate(base)
+    assert msg.text == "x"
+
+
+def test_match_provider_user_id():
+    from ceki_browser._models import Match
+    m = Match.model_validate({
+        "session_id": "sess-1",
+        "schedule_id": 240,
+        "event_id": "ev-1",
+        "chat_topic_id": "69fcbb000000000000000002",
+        "provider_user_id": 3,
+        "browser_info": {},
+    })
+    assert m.provider_user_id == 3
+
+
+def test_match_provider_user_id_missing():
+    from ceki_browser._models import Match
+    m = Match.model_validate({
+        "session_id": "sess-2",
+        "schedule_id": 240,
+    })
+    assert m.provider_user_id is None

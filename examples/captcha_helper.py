@@ -15,7 +15,9 @@ async def main() -> None:
     provider_text: dict[str, str] = {}
 
     async def on_msg(msg) -> None:
-        if msg.sender_type == "provider":
+        if msg.is_system():
+            return
+        if msg.is_from_provider(browser.provider_user_id):
             provider_text["value"] = msg.text or ""
             provider_replied.set()
 
