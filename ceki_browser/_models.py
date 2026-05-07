@@ -22,7 +22,7 @@ class Match(BaseModel):
     session_id: str
     schedule_id: int
     event_id: str | None = None
-    chat_topic_id: int | None = None
+    chat_topic_id: str | None = None
     started_at: float = 0.0
     browser_info: dict = {}
 

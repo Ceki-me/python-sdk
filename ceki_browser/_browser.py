@@ -46,7 +46,7 @@ class Browser:
         return self._match.schedule_id
 
     @property
-    def chat_topic_id(self) -> int | None:
+    def chat_topic_id(self) -> str | None:
         return self._match.chat_topic_id
 
     @property

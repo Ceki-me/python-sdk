@@ -36,7 +36,7 @@ def _detect_mime(data: bytes) -> str:
 class BrowserChat:
     def __init__(self, browser: "Browser") -> None:
         self._browser = browser
-        self._topic_id: int | None = browser.chat_topic_id
+        self._topic_id: str | None = browser.chat_topic_id
         self._message_callbacks: list[MessageCallback] = []
         self._read_callbacks: list[ReadCallback] = []
         self._pending_sends: dict[str, asyncio.Future[dict]] = {}
