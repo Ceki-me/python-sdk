@@ -204,7 +204,7 @@ class Browser:
         elif code == -1018:
             reason = "killed"
         else:
-            reason = msg.get("message", f"error_{code}")
+            reason = msg.get("reason") or msg.get("message") or f"error_{code}"
 
         self._ended_reason = reason
         terminal_exc: Exception

@@ -6,6 +6,7 @@ import pytest
 
 from ceki_browser import Client, ConnectOptions, connect
 from ceki_browser._exceptions import (
+    ProviderOffline,
     RateLimitExceeded,
     SessionEnded,
 )
@@ -66,9 +67,9 @@ async def test_rent_error_with_event_id_raises_exception(mock_relay: MockRelaySe
         "event_id": "777",
     })
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(ProviderOffline) as exc_info:
         await asyncio.wait_for(rent_task, timeout=5)
-    assert "relay error -1015" in str(exc_info.value)
+    assert "no_providers" in str(exc_info.value)
 
     await client.close()
 

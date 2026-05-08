@@ -54,6 +54,7 @@ class Client:
         self._backoff_attempt = 0
         self._last_pong = 0.0
         self._closed = False
+        self._stashed_first_frame: str | None = None
 
     def _ws_extra_headers(self) -> dict[str, str]:
         if not self._basic_auth:
@@ -85,6 +86,17 @@ class Client:
                     pass
                 raise RateLimitExceeded(retry_after) from exc
             raise
+        # Probe for immediate close (4401/4403 post-handshake auth rejection)
+        try:
+            first = await asyncio.wait_for(self._ws.recv(), timeout=1.0)
+            self._stashed_first_frame = first if isinstance(first, str) else first.decode()
+        except asyncio.TimeoutError:
+            self._stashed_first_frame = None
+        except websockets.exceptions.ConnectionClosedError as exc:
+            if exc.rcvd and exc.rcvd.code in (4401, 4403):
+                raise AuthFailed(f"ws closed with code {exc.rcvd.code}: {exc.rcvd.reason or 'auth_failed'}") from exc
+            raise
+
         self._last_pong = time.monotonic()
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop(), name="heartbeat")
         self._reader_task = asyncio.create_task(self._reader_loop(), name="reader")
@@ -163,11 +175,18 @@ class Client:
                 break
 
     async def _reader_loop(self) -> None:
+        if self._stashed_first_frame is not None:
+            try:
+                msg: dict[str, Any] = json.loads(self._stashed_first_frame)
+                self._stashed_first_frame = None
+                await self._dispatch(msg)
+            except Exception as exc:
+                log.error("error dispatching stashed frame: %s", exc)
         while not self._closed:
             try:
                 assert self._ws is not None
                 raw = await self._ws.recv()
-                msg: dict[str, Any] = json.loads(raw)
+                msg = json.loads(raw)
                 await self._dispatch(msg)
             except websockets.exceptions.ConnectionClosedError as exc:
                 if exc.rcvd and exc.rcvd.code in (4401, 4403):
@@ -300,16 +319,20 @@ class Client:
     def _handle_error(self, msg: dict[str, Any]) -> None:
         code = msg.get("code", 0)
         server_event_id = msg.get("event_id")
+        msg_text = msg.get("reason") or msg.get("message")
         if code == -1013:
             exc: Exception = RateLimitExceeded(retry_after=float(msg.get("retry_after", 1.0)))
         elif code == -1012:
             exc = InsufficientFunds()
         elif code in (-1011, -1018):
-            exc = SessionEnded(reason=msg.get("message", "ended"))
+            exc = SessionEnded(reason=msg_text or "ended")
+        elif code == -1015:
+            from ._exceptions import ProviderOffline
+            exc = ProviderOffline(msg_text or "no_providers")
         elif code == -1050:
-            exc = CdpUnrecoverable(last_error=msg.get("message", "cdp_error"))
+            exc = CdpUnrecoverable(last_error=msg_text or "cdp_error")
         else:
-            exc = Exception(f"relay error {code}: {msg.get('message')}")
+            exc = Exception(f"relay error {code}: {msg_text}")
 
         if server_event_id:
             fut = self._pending_rents.pop(str(server_event_id), None)
