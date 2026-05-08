@@ -35,12 +35,14 @@ class Client:
         api_key: str,
         relay_url: str,
         api_url: str,
+        chat_url: str,
         reconnect: bool = True,
         basic_auth: tuple[str, str] | None = None,
     ) -> None:
         self.api_key = api_key
         self.relay_url = relay_url
         self.api_url = api_url
+        self.chat_url = chat_url
         self.reconnect = reconnect
         self._basic_auth = basic_auth
         self._ws: websockets.WebSocketClientProtocol | None = None
@@ -75,6 +77,13 @@ class Client:
         except websockets.exceptions.InvalidStatusCode as exc:
             if exc.status_code in (401, 403):
                 raise AuthFailed(f"handshake rejected: {exc.status_code}") from exc
+            if exc.status_code == 429:
+                retry_after = 0
+                try:
+                    retry_after = int(exc.response_headers.get('Retry-After', 0))
+                except (AttributeError, ValueError, TypeError):
+                    pass
+                raise RateLimitExceeded(retry_after) from exc
             raise
         self._last_pong = time.monotonic()
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop(), name="heartbeat")
@@ -160,9 +169,22 @@ class Client:
                 raw = await self._ws.recv()
                 msg: dict[str, Any] = json.loads(raw)
                 await self._dispatch(msg)
+            except websockets.exceptions.ConnectionClosedError as exc:
+                if exc.rcvd and exc.rcvd.code in (4401, 4403):
+                    # Server rejected auth post-handshake
+                    self._closed = True
+                    for fut in list(self._pending_rent_queue):
+                        if not fut.done():
+                            fut.set_exception(AuthFailed(f"ws closed with code {exc.rcvd.code}: {exc.rcvd.reason}"))
+                    self._pending_rent_queue.clear()
+                    return
+                if not self._closed and self.reconnect:
+                    asyncio.create_task(self._reconnect_loop())
+                else:
+                    self._fail_pending(ConnectionLost("connection closed"))
+                break
             except (
                 websockets.exceptions.ConnectionClosed,
-                websockets.exceptions.ConnectionClosedError,
                 websockets.exceptions.ConnectionClosedOK,
             ):
                 if not self._closed and self.reconnect:
@@ -186,6 +208,18 @@ class Client:
                 fut = self._pending_rent_queue.pop(0)
                 if not fut.done():
                     self._pending_rents[str(server_event_id)] = fut
+            return
+        if mtype == "rent.error":
+            code = msg.get("code", "")
+            message = msg.get("message", "rent failed")
+            if self._pending_rent_queue:
+                fut = self._pending_rent_queue.pop(0)
+                if not fut.done():
+                    if code == "provider_offline":
+                        from ._exceptions import ProviderOffline
+                        fut.set_exception(ProviderOffline(message))
+                    else:
+                        fut.set_exception(CekiError(message))
             return
         if mtype == "match":
             server_event_id = str(msg.get("event_id", ""))
@@ -234,6 +268,12 @@ class Client:
             browser = self._active_browsers.get(session_id)
             if browser:
                 await browser.chat._on_send_ack(msg)
+            return
+        if mtype == "chat.error":
+            session_id = msg.get("session_id", "")
+            browser = self._active_browsers.get(session_id)
+            if browser:
+                asyncio.create_task(browser.chat._on_send_error(msg))
             return
         if mtype == "error":
             session_id = msg.get("session_id")

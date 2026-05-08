@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import httpx
 
+from ._exceptions import ChatSendFailed
 from ._models import ChatMessage, ReadReceipt
 
 if TYPE_CHECKING:
@@ -66,6 +67,7 @@ class BrowserChat:
         image: bytes | str | Path,
         *,
         mime: str | None = None,
+        filename: str | None = None,
     ) -> dict:
         if not self._topic_id:
             raise RuntimeError("chat topic not assigned (rent did not return chat_topic_id)")
@@ -76,10 +78,15 @@ class BrowserChat:
             if mime is None:
                 guessed, _ = mimetypes.guess_type(str(path))
                 mime = guessed or _detect_mime(data)
+            if filename is None:
+                filename = path.name
         else:
             data = image
             if mime is None:
                 mime = _detect_mime(data)
+            if filename is None:
+                ext = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp'}.get(mime or '', 'bin')
+                filename = f'image-{uuid4().hex[:8]}.{ext}'
 
         if len(data) > MAX_IMAGE_BYTES:
             raise ValueError(f"image too large, max 5MB (got {len(data)} bytes)")
@@ -95,8 +102,9 @@ class BrowserChat:
                     "type": "chat.send_image",
                     "session_id": self._browser.session_id,
                     "client_msg_id": client_msg_id,
+                    "filename": filename,
                     "mime": mime,
-                    "base64": b64,
+                    "data_b64": b64,
                 }
             )
             return await asyncio.wait_for(asyncio.shield(fut), timeout=15)
@@ -117,17 +125,13 @@ class BrowserChat:
         if not self._topic_id:
             return []
         client = self._browser._client
-        base = (
-            client.relay_url.replace("wss://", "https://")
-            .replace("ws://", "http://")
-            .replace("/ws/agent", "")
-        )
+        base = client.chat_url.rstrip('/')
         params: dict = {"limit": limit}
         if before_id is not None:
-            params["before_id"] = before_id
+            params["before"] = before_id
         req = httpx.Request(
             "GET",
-            f"{base}/api/chat/topics/{self._topic_id}/messages",
+            f"{base}/topics/{self._topic_id}/messages",
             headers={"Authorization": f"Bearer {client.api_key}"},
             params=params,
         )
@@ -135,7 +139,7 @@ class BrowserChat:
             resp = await http.send(req)
             resp.raise_for_status()
         data = resp.json()
-        items = data.get("data", data) if isinstance(data, dict) else data
+        items = data.get("messages", data.get("data", data)) if isinstance(data, dict) else data
         return [ChatMessage.model_validate(m) for m in items]
 
     async def _on_message(self, payload: dict) -> None:
@@ -177,3 +181,12 @@ class BrowserChat:
                         "sent_at": msg.get("sent_at"),
                     }
                 )
+
+    async def _on_send_error(self, msg: dict) -> None:
+        client_msg_id = msg.get("client_msg_id", "")
+        status = msg.get("status", 0)
+        message = msg.get("message", "unknown")
+        if client_msg_id and client_msg_id in self._pending_sends:
+            fut = self._pending_sends.pop(client_msg_id)
+            if not fut.done():
+                fut.set_exception(ChatSendFailed(status, message))

@@ -30,3 +30,14 @@ class CdpUnrecoverable(CekiError):
 
 class ConnectionLost(CekiError):
     pass
+
+
+class ChatSendFailed(CekiError):
+    def __init__(self, status: int, message: str):
+        super().__init__(f"chat send failed [{status}]: {message}")
+        self.status = status
+        self.message_text = message
+
+
+class ProviderOffline(CekiError):
+    pass

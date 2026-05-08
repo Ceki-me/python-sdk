@@ -10,3 +10,10 @@ def default_api_url() -> str:
 
 def default_relay_url() -> str:
     return os.getenv("CEKI_RELAY_URL") or DEFAULT_RELAY_URL
+
+
+DEFAULT_CHAT_URL = "https://chat.ceki.me/api/chat"
+
+
+def default_chat_url() -> str:
+    return os.getenv("CEKI_CHAT_URL") or DEFAULT_CHAT_URL
