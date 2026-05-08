@@ -80,7 +80,10 @@ async def test_history_passes_limit_param(chat_browser):
         await browser.chat.history(limit=10)
 
     assert len(captured_request) == 1
-    assert "limit=10" in str(captured_request[0].url)
+    url_str = str(captured_request[0].url)
+    assert "limit=10" in url_str
+    assert "topic_id=" in url_str
+    assert "/messages" in url_str
 
 
 @pytest.mark.asyncio
@@ -101,6 +104,8 @@ async def test_history_passes_before_id_param(chat_browser):
     url_str = str(captured_request[0].url)
     assert "before=100" in url_str
     assert "limit=5" in url_str
+    assert "topic_id=" in url_str
+    assert "/messages" in url_str
 
 
 @pytest.mark.asyncio

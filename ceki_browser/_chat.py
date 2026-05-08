@@ -126,12 +126,12 @@ class BrowserChat:
             return []
         client = self._browser._client
         base = client.chat_url.rstrip('/')
-        params: dict = {"limit": limit}
+        params: dict = {"topic_id": self._topic_id, "limit": limit}
         if before_id is not None:
             params["before"] = before_id
         req = httpx.Request(
             "GET",
-            f"{base}/topics/{self._topic_id}/messages",
+            f"{base}/messages",
             headers={"Authorization": f"Bearer {client.api_key}"},
             params=params,
         )
