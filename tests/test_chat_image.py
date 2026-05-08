@@ -27,7 +27,7 @@ async def chat_browser(mock_relay, tmp_path):
             "event_id": server_ev,
             "session_id": "sess-img",
             "schedule_id": 1,
-            "chat_topic_id": 88,
+            "chat_topic_id": "88",
             "browser_info": {},
         })
 
@@ -62,7 +62,7 @@ async def test_send_image_png_mime_detect(chat_browser):
     sent = await t
 
     assert sent["mime"] == "image/png"
-    assert sent["base64"] == base64.b64encode(PNG_MAGIC).decode()
+    assert sent["data_b64"] == base64.b64encode(PNG_MAGIC).decode()
 
 
 @pytest.mark.asyncio
