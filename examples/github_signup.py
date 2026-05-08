@@ -4,12 +4,12 @@ GitHub signup via ceki-browser SDK.
 Run:
   CEKI_API_KEY=... \\
   CEKI_RELAY_URL=wss://relay.ittribe.org/ws/agent \\
-  SCHEDULE_ID=42 \\
   IMAP_HOST=mail.ceki.me IMAP_USER=kom@ceki.me IMAP_PASS=... \\
   EMAIL_TAG=browserlend2 \\
   python examples/github_signup.py
 
-Requires: provider with schedule_id=42 online and accepting rents.
+Discovers an online provider via `client.search()` and rents the first one.
+Optional `SCHEDULE_ID=N` env pins a specific provider (skip discovery).
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ import secrets
 import string
 
 from ceki_browser import connect
+from ceki_browser._connect import ConnectOptions
 
 from .imap_helper import wait_for_confirm_link
 
@@ -32,16 +33,31 @@ def _random_password(length: int = 16) -> str:
 async def main() -> None:
     api_key = os.environ["CEKI_API_KEY"]
     relay_url = os.environ.get("CEKI_RELAY_URL", "wss://relay.ittribe.org/ws/agent")
-    schedule_id = int(os.environ["SCHEDULE_ID"])
+    pinned_schedule_id = os.environ.get("SCHEDULE_ID")
     email_tag = os.environ.get("EMAIL_TAG", f"browserlend-{secrets.token_hex(4)}")
+    email_base = os.environ.get("EMAIL_BASE", "kom@ceki.me")
+    local, _, domain = email_base.partition("@")
 
-    email_addr = f"kom+{email_tag}@ceki.me"
+    email_addr = f"{local}+{email_tag}@{domain}"
     username = f"tribe-{secrets.token_hex(4)}"
     password = _random_password()
 
     print(f"[github_signup] email={email_addr} username={username}")
 
-    client = await connect(api_key, relay_url=relay_url)
+    client = await connect(api_key, ConnectOptions(relay_url=relay_url))
+
+    if pinned_schedule_id is not None:
+        schedule_id = int(pinned_schedule_id)
+        print(f"[search] using pinned SCHEDULE_ID={schedule_id}")
+    else:
+        options = await client.search({})
+        if not options:
+            print("[search] no online providers — try later")
+            await client.close()
+            return
+        schedule_id = options[0].schedule_id
+        print(f"[search] found {len(options)} provider(s), renting schedule_id={schedule_id}")
+
     browser = await client.rent(schedule_id)
     print(f"[session] id={browser.session_id} chat_topic_id={browser.chat_topic_id}")
     print(f"[session] browser_info={browser.browser_info}")
@@ -69,9 +85,6 @@ async def main() -> None:
             load_fired.set()
 
     browser.on_event(on_event)
-
-    await browser.send({"method": "Page.enable"})
-    await browser.send({"method": "Network.enable"})
 
     load_fired.clear()
     await browser.send({"method": "Page.navigate", "params": {"url": "https://github.com/signup"}})

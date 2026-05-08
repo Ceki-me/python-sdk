@@ -32,10 +32,12 @@ def _extract_body(msg: email.message.Message) -> str:
 
 def _check_imap(tag: str, service: str) -> str | None:
     pattern = CONFIRM_PATTERNS[service]
+    email_base = os.environ.get("EMAIL_BASE", "kom@ceki.me")
+    local, _, domain = email_base.partition("@")
     with imaplib.IMAP4_SSL(os.environ["IMAP_HOST"]) as m:
         m.login(os.environ["IMAP_USER"], os.environ["IMAP_PASS"])
         m.select("INBOX")
-        typ, data = m.search(None, f'TO "kom+{tag}@ceki.me"')
+        typ, data = m.search(None, f'TO "{local}+{tag}@{domain}"')
         if typ != "OK" or not data[0]:
             return None
         for msg_id in reversed(data[0].split()):
