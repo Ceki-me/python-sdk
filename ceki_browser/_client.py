@@ -251,6 +251,18 @@ class Client:
             if browser:
                 await browser._on_session_ended(msg)
             return
+        if mtype == "session.provider_disconnected":
+            session_id = msg.get("session_id", "")
+            browser = self._active_browsers.get(session_id)
+            if browser:
+                await browser._on_provider_disconnected(msg)
+            return
+        if mtype == "session.provider_reconnected":
+            session_id = msg.get("session_id", "")
+            browser = self._active_browsers.get(session_id)
+            if browser:
+                await browser._on_provider_reconnected(msg)
+            return
         if mtype == "chat.message":
             session_id = msg.get("session_id", "")
             browser = self._active_browsers.get(session_id)

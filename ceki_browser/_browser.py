@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 from ._exceptions import (
     CdpUnrecoverable,
     InsufficientFunds,
+    ProviderDisconnected,
     RateLimitExceeded,
     SessionEnded,
 )
@@ -18,6 +19,7 @@ log = logging.getLogger(__name__)
 
 EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 TabOpenedCallback = Callable[[str], Awaitable[None]]
+SimpleCallback = Callable[[], Awaitable[None]]
 
 _ERROR_TERMINAL = {-1011, -1012, -1015, -1018}
 
@@ -30,6 +32,8 @@ class Browser:
         self._pending_cdp: dict[int, asyncio.Future[Any]] = {}
         self._event_callbacks: list[EventCallback] = []
         self._tab_opened_callbacks: list[TabOpenedCallback] = []
+        self._provider_disconnected_callbacks: list[SimpleCallback] = []
+        self._provider_reconnected_callbacks: list[SimpleCallback] = []
         self._ended = asyncio.Event()
         self._ended_reason: str | None = None
 
@@ -85,6 +89,12 @@ class Browser:
 
     def on_tab_opened(self, callback: TabOpenedCallback) -> None:
         self._tab_opened_callbacks.append(callback)
+
+    def on_provider_disconnected(self, callback: SimpleCallback) -> None:
+        self._provider_disconnected_callbacks.append(callback)
+
+    def on_provider_reconnected(self, callback: SimpleCallback) -> None:
+        self._provider_reconnected_callbacks.append(callback)
 
     async def switch_tab(self) -> None:
         await self._client._ws_send({"type": "switch_tab", "session_id": self.session_id})
@@ -143,13 +153,24 @@ class Browser:
     async def _on_session_ended(self, msg: dict[str, Any]) -> None:
         reason = msg.get("reason", "completed")
         self._ended_reason = reason
-        exc = SessionEnded(reason)
+        if reason == "provider_disconnected":
+            exc: Exception = ProviderDisconnected()
+        else:
+            exc = SessionEnded(reason)
         for fut in self._pending_cdp.values():
             if not fut.done():
                 fut.set_exception(exc)
         self._pending_cdp.clear()
         self._ended.set()
         self._client._active_browsers.pop(self.session_id, None)
+
+    async def _on_provider_disconnected(self, msg: dict[str, Any]) -> None:
+        for cb in self._provider_disconnected_callbacks:
+            asyncio.create_task(cast(Coroutine, cb()))
+
+    async def _on_provider_reconnected(self, msg: dict[str, Any]) -> None:
+        for cb in self._provider_reconnected_callbacks:
+            asyncio.create_task(cast(Coroutine, cb()))
 
     async def _on_error(self, msg: dict[str, Any]) -> None:
         code = msg.get("code", 0)

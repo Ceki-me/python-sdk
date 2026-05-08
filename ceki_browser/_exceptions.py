@@ -41,3 +41,8 @@ class ChatSendFailed(CekiError):
 
 class ProviderOffline(CekiError):
     pass
+
+
+class ProviderDisconnected(CekiError):
+    """Provider's browser disconnected during rental and didn't reconnect within grace period."""
+    pass

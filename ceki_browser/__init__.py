@@ -7,6 +7,7 @@ from ._exceptions import (
     CekiError,
     ConnectionLost,
     InsufficientFunds,
+    ProviderDisconnected,
     RateLimitExceeded,
     SessionEnded,
 )
@@ -28,5 +29,6 @@ __all__ = [
     "CdpUnrecoverable",
     "AuthFailed",
     "ConnectionLost",
+    "ProviderDisconnected",
     "CekiError",
 ]
