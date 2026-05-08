@@ -212,14 +212,16 @@ class Client:
         if mtype == "rent.error":
             code = msg.get("code", "")
             message = msg.get("message", "rent failed")
-            if self._pending_rent_queue:
+            server_event_id = str(msg.get("event_id", "")) if msg.get("event_id") is not None else None
+            from ._exceptions import ProviderOffline
+            exc_to_raise: Exception = ProviderOffline(message) if code == "provider_offline" else CekiError(message)
+            fut: asyncio.Future[Match] | None = None
+            if server_event_id:
+                fut = self._pending_rents.pop(server_event_id, None)
+            if fut is None and self._pending_rent_queue:
                 fut = self._pending_rent_queue.pop(0)
-                if not fut.done():
-                    if code == "provider_offline":
-                        from ._exceptions import ProviderOffline
-                        fut.set_exception(ProviderOffline(message))
-                    else:
-                        fut.set_exception(CekiError(message))
+            if fut and not fut.done():
+                fut.set_exception(exc_to_raise)
             return
         if mtype == "match":
             server_event_id = str(msg.get("event_id", ""))
