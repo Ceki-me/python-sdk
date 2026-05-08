@@ -87,6 +87,40 @@ Close all sessions and the connection.
 | `CdpUnrecoverable` | CDP connection lost permanently |
 | `ConnectionLost` | Relay connection lost after max reconnects |
 
+## Session profile (cookies + storage)
+
+`browser.profile` lets you snapshot and restore cookies, `localStorage`, and `sessionStorage` between sessions — without involving the relay or backend. The blob stays in your own storage.
+
+```python
+import json
+
+# First session — sign up, then export profile
+async with await client.rent(schedule_id) as browser:
+    await browser.send({"method": "Page.navigate", "params": {"url": "https://reddit.com/login"}})
+    # ... perform signup, 2FA ...
+    profile = await browser.profile.export(domains=[".reddit.com", "reddit.com"])
+
+with open("reddit_profile.json", "w") as f:
+    json.dump(profile, f)
+
+# Next session — restore profile (navigate first, then import storage)
+with open("reddit_profile.json") as f:
+    profile = json.load(f)
+
+async with await client.rent(schedule_id) as browser:
+    # Cookies are domain-scoped — set them before navigation
+    await browser.profile.import_(profile)
+    await browser.send({"method": "Page.navigate", "params": {"url": "https://reddit.com"}})
+    # already logged in
+```
+
+**Notes:**
+- `localStorage`/`sessionStorage` require a document context — navigate to the target origin before calling `import_()`, or call it right after navigation.
+- Cookies (`Network.setCookies`) work before any navigation.
+- Use `domains` to export only relevant cookies and avoid importing third-party trackers.
+- Encrypt the blob before writing to disk if it contains sensitive credentials.
+- `import_()` raises `ValueError` on `schema_version` mismatch (future-proofing).
+
 ## CDP Lifecycle
 
 The relay maintains the CDP connection to the incognito browser tab. If the connection drops, it automatically reattaches with 1s/2s/4s exponential backoff. Commands during reattach are buffered (FIFO, max 50). If 3 reattach attempts fail, a new fallback tab is created. If that also fails, `cdp_unrecoverable` error is sent.

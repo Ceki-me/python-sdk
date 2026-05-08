@@ -1,6 +1,7 @@
 from ._browser import Browser
 from ._client import Client
 from ._connect import ConnectOptions, connect
+from ._profile import BrowserProfile
 from ._exceptions import (
     AuthFailed,
     CdpUnrecoverable,
@@ -30,5 +31,6 @@ __all__ = [
     "AuthFailed",
     "ConnectionLost",
     "ProviderDisconnected",
+    "BrowserProfile",
     "CekiError",
 ]

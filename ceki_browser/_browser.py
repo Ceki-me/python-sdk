@@ -38,8 +38,10 @@ class Browser:
         self._ended_reason: str | None = None
 
         from ._chat import BrowserChat
+        from ._profile import BrowserProfile
 
         self.chat = BrowserChat(self)
+        self.profile = BrowserProfile(self)
 
     @property
     def session_id(self) -> str:
