@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Coroutine, cast
+
+from .humanize import HumanProfile, Humanizer
 
 if TYPE_CHECKING:
     from ._client import Client
@@ -24,8 +28,25 @@ SimpleCallback = Callable[[], Awaitable[None]]
 _ERROR_TERMINAL = {-1011, -1012, -1015, -1018}
 
 
+def _resolve_human(human) -> Humanizer | None:
+    if os.environ.get("CEKI_HUMAN_DISABLE", "").lower() in ("1", "true", "yes"):
+        return None
+    if human is None:
+        return None
+    if isinstance(human, HumanProfile):
+        return Humanizer(human)
+    if isinstance(human, dict):
+        return Humanizer(HumanProfile.from_dict(human))
+    if isinstance(human, (str, Path)):
+        s = str(human)
+        if s in ("natural", "careful"):
+            return Humanizer(HumanProfile.load_preset(s))
+        return Humanizer(HumanProfile.load(s))
+    raise ValueError(f"Invalid human profile: {human!r}")
+
+
 class Browser:
-    def __init__(self, client: "Client", match: Match) -> None:
+    def __init__(self, client: "Client", match: Match, *, human="natural") -> None:
         self._client = client
         self._match = match
         self._cdp_counter = 0
@@ -42,6 +63,14 @@ class Browser:
 
         self.chat = BrowserChat(self)
         self.profile = BrowserProfile(self)
+
+        env_profile = os.environ.get("CEKI_HUMAN_PROFILE")
+        env_path = os.environ.get("CEKI_HUMAN_PROFILE_PATH")
+        if human == "natural" and env_profile:
+            human = env_profile
+        elif human == "natural" and env_path:
+            human = env_path
+        self._humanizer = _resolve_human(human)
 
     @property
     def session_id(self) -> str:
@@ -125,6 +154,67 @@ class Browser:
     async def wait_until_ended(self) -> str:
         await self._ended.wait()
         return self._ended_reason or "unknown"
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # High-level browser actions (with optional human-like timing)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def navigate(self, url: str, *, timeout: float = 30.0) -> dict:
+        if self._humanizer:
+            await self._humanizer.before("navigate")
+        result = await self.send({"method": "Page.navigate", "params": {"url": url}}, timeout=timeout)
+        if self._humanizer:
+            await self._humanizer.after("navigate")
+        return result
+
+    async def click(self, x: int | float, y: int | float) -> None:
+        if self._humanizer:
+            await self._humanizer.before("click")
+        await self.send({"method": "Input.dispatchMouseEvent", "params": {
+            "type": "mousePressed", "x": int(x), "y": int(y), "button": "left", "clickCount": 1,
+        }})
+        await self.send({"method": "Input.dispatchMouseEvent", "params": {
+            "type": "mouseReleased", "x": int(x), "y": int(y), "button": "left", "clickCount": 1,
+        }})
+        if self._humanizer:
+            await self._humanizer.after("click")
+
+    async def type(self, text: str) -> None:
+        if self._humanizer:
+            await self._humanizer.before("type")
+            async for char, delay_ms in self._humanizer.humanize_text(text):
+                await self.send({"method": "Input.insertText", "params": {"text": char}})
+                if delay_ms > 0:
+                    await asyncio.sleep(delay_ms / 1000)
+            await self._humanizer.after("type")
+        else:
+            await self.send({"method": "Input.insertText", "params": {"text": text}})
+
+    async def scroll(
+        self, x: int = 0, y: int = 0, *, delta_x: int = 0, delta_y: int = -300
+    ) -> None:
+        if self._humanizer:
+            await self._humanizer.before("scroll")
+        await self.send({"method": "Input.dispatchMouseEvent", "params": {
+            "type": "mouseWheel", "x": x, "y": y, "deltaX": delta_x, "deltaY": delta_y,
+        }})
+        if self._humanizer:
+            await self._humanizer.after("scroll")
+
+    async def screenshot(self) -> bytes:
+        import base64
+        if self._humanizer:
+            await self._humanizer.before("screenshot")
+        resp = await self.send({"method": "Page.captureScreenshot"})
+        if self._humanizer:
+            await self._humanizer.after("screenshot")
+        data = resp.get("data", "")
+        return base64.b64decode(data) if data else b""
+
+    def set_human(self, profile) -> "HumanProfile | None":
+        prev = self._humanizer.profile if self._humanizer else None
+        self._humanizer = _resolve_human(profile)
+        return prev
 
     # ──────────────────────────────────────────────────────────────────────────
     # Internal dispatch (called from Client._reader_loop)

@@ -13,8 +13,9 @@ from ._exceptions import (
     SessionEnded,
 )
 from ._models import BrowserOption, ChatMessage, Match, ReadReceipt
+from .humanize import HumanProfile
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 __all__ = [
     "connect",
     "ConnectOptions",
@@ -33,4 +34,5 @@ __all__ = [
     "ProviderDisconnected",
     "BrowserProfile",
     "CekiError",
+    "HumanProfile",
 ]

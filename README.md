@@ -139,6 +139,47 @@ python examples/reddit_signup.py
 
 These are NOT automated tests — they require a live relay, an online provider, and a real IMAP mailbox. Run manually as part of Phase 2 acceptance.
 
+## Human Mode
+
+Browser actions can optionally include human-like timing — delays before/after actions and per-character typing with jitter.
+
+```python
+# Default: natural profile (enabled by default)
+browser = await client.rent(schedule_id)
+
+# Explicit profile
+browser = await client.rent(schedule_id, human="careful")
+
+# Disable humanization
+browser = await client.rent(schedule_id, human=None)
+
+# Custom profile dict
+browser = await client.rent(schedule_id, human={"typing": {"wpm": 130}})
+```
+
+### High-level methods
+
+```python
+await browser.navigate("https://example.com")
+await browser.click(100, 200)
+await browser.type("Hello, world!")  # Per-char with jitter when human mode on
+await browser.scroll(delta_y=-300)
+img_bytes = await browser.screenshot()
+```
+
+### Runtime control
+
+```python
+prev = browser.set_human("careful")  # Switch profile, returns previous
+browser.set_human(None)               # Disable mid-session
+```
+
+### Environment variables
+
+- `CEKI_HUMAN_PROFILE` — Override default profile name (e.g., `careful`)
+- `CEKI_HUMAN_PROFILE_PATH` — Path to custom JSON profile file
+- `CEKI_HUMAN_DISABLE=1` — Disable humanization entirely
+
 ## Development
 
 ```bash
