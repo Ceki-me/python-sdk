@@ -122,7 +122,7 @@ class Client:
         items = data.get("data", data) if isinstance(data, dict) else data
         return [BrowserOption.model_validate(x) for x in items]
 
-    async def rent(self, schedule_id: int, *, human="natural") -> Browser:
+    async def rent(self, schedule_id: int, *, human="natural", masking_mode: bool = True) -> Browser:
         fut: asyncio.Future[Match] = asyncio.get_event_loop().create_future()
         self._pending_rent_queue.append(fut)
         await self._ws_send({"type": "rent", "schedule_id": schedule_id})
@@ -136,6 +136,8 @@ class Client:
             raise TimeoutError("rent timed out waiting for match")
         browser = Browser(client=self, match=match, human=human)
         self._active_browsers[match.session_id] = browser
+        if not masking_mode:
+            await browser.configure(masking_mode=False)
         return browser
 
     async def close(self) -> None:
