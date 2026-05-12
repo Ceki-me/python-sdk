@@ -93,8 +93,8 @@ async def _cmd_snapshot(args: argparse.Namespace) -> None:
         out_path = args.output
         with open(out_path, "wb") as f:
             f.write(png_bytes)
-        if snap.chat:
-            update_last_seen_ts(args.session_id, snap.chat[-1].created_at)
+        if browser._last_seen_ts:
+            update_last_seen_ts(args.session_id, browser._last_seen_ts)
         chat_list = [{"from": m.sender_id, "text": m.text, "ts": m.created_at} for m in snap.chat]
         _out({"screenshot": out_path, "chat": chat_list, "ts": snap.ts.isoformat()})
     finally:

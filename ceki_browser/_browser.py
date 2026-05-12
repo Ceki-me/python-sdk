@@ -236,10 +236,12 @@ class Browser:
         from datetime import datetime, timezone
         resp = await self.send({"method": "Page.captureScreenshot"})
         screenshot_b64 = resp.get("data", "")
-        new_msgs = await self.chat.history(since=self._last_seen_ts)
-        if new_msgs:
-            self._last_seen_ts = new_msgs[-1].created_at
-        return Snapshot(screenshot=screenshot_b64, chat=new_msgs, ts=datetime.now(timezone.utc))
+        all_msgs = await self.chat.history(since=self._last_seen_ts)
+        if self._last_seen_ts and all_msgs:
+            all_msgs = [m for m in all_msgs if m.created_at > self._last_seen_ts]
+        if all_msgs:
+            self._last_seen_ts = all_msgs[-1].created_at
+        return Snapshot(screenshot=screenshot_b64, chat=all_msgs, ts=datetime.now(timezone.utc))
 
     def set_human(self, profile) -> "HumanProfile | None":
         prev = self._humanizer.profile if self._humanizer else None
