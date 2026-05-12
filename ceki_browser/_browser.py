@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Coroutine, cast
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Coroutine, Literal, cast
 
 from .humanize import HumanProfile, Humanizer
 
@@ -205,15 +205,24 @@ class Browser:
         if self._humanizer:
             await self._humanizer.after("scroll")
 
-    async def screenshot(self) -> bytes:
-        import base64
+    async def screenshot(self, *, format: Literal["base64", "png"] = "base64") -> dict | bytes:
+        """Take a screenshot.
+
+        Args:
+            format: ``"base64"`` (default) returns CDP-shape dict, ``"png"`` returns raw PNG bytes.
+        """
+        if format not in ("base64", "png"):
+            raise ValueError(f"Unsupported format: {format!r}. Use 'base64' or 'png'.")
         if self._humanizer:
             await self._humanizer.before("screenshot")
         resp = await self.send({"method": "Page.captureScreenshot"})
         if self._humanizer:
             await self._humanizer.after("screenshot")
+        if format == "base64":
+            return resp
+        import base64 as _b64
         data = resp.get("data", "")
-        return base64.b64decode(data) if data else b""
+        return _b64.b64decode(data) if data else b""
 
     def set_human(self, profile) -> "HumanProfile | None":
         prev = self._humanizer.profile if self._humanizer else None
