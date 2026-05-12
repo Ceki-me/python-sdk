@@ -151,6 +151,10 @@ class Browser:
         finally:
             self._client._active_browsers.pop(self.session_id, None)
 
+    async def release(self, *, timeout: float = 10.0) -> None:
+        """Alias for :meth:`close` — завершить аренду браузера."""
+        await self.close(timeout=timeout)
+
     async def wait_until_ended(self) -> str:
         await self._ended.wait()
         return self._ended_reason or "unknown"
