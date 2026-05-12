@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
+import mimetypes
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Coroutine, Literal, cast
@@ -242,6 +245,83 @@ class Browser:
         if all_msgs:
             self._last_seen_ts = all_msgs[-1].created_at
         return Snapshot(screenshot=screenshot_b64, chat=all_msgs, ts=datetime.now(timezone.utc))
+
+    async def upload(
+        self,
+        selector: str,
+        source: str | Path | bytes,
+        *,
+        filename: str | None = None,
+    ) -> dict:
+        """Upload a file to an ``<input type="file">`` element.
+
+        Args:
+            selector: CSS selector for the file input element.
+            source: File path (str/Path) or raw bytes.
+            filename: Override the filename (default: basename of path or ``upload.bin``).
+
+        Returns:
+            ``{"ok": True, "filename": "...", "size": N}`` on success.
+
+        Raises:
+            ValueError: If selector matches no element or element is not a file input.
+        """
+        if isinstance(source, (str, Path)):
+            path = Path(source)
+            if not path.is_file():
+                raise ValueError(f"file not found: {path}")
+            data = path.read_bytes()
+            if filename is None:
+                filename = path.name
+        elif isinstance(source, bytes):
+            data = source
+            if filename is None:
+                filename = "upload.bin"
+        else:
+            raise TypeError(f"source must be str, Path, or bytes, got {type(source).__name__}")
+
+        mime_type, _ = mimetypes.guess_type(filename)
+        if mime_type is None:
+            mime_type = "application/octet-stream"
+
+        b64_data = base64.b64encode(data).decode("ascii")
+
+        js_selector = json.dumps(selector)
+        js_filename = json.dumps(filename)
+        js_mimetype = json.dumps(mime_type)
+
+        js_expr = (
+            "(function() {"
+            f"var input = document.querySelector({js_selector});"
+            "if (!input) return JSON.stringify({error: 'no input matched'});"
+            "if (input.type !== 'file') return JSON.stringify({error: 'element is not a file input'});"
+            f"var b64 = '{b64_data}';"
+            "var bin = atob(b64);"
+            "var bytes = new Uint8Array(bin.length);"
+            "for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);"
+            f"var file = new File([bytes], {js_filename}, {{type: {js_mimetype}}});"
+            "var dt = new DataTransfer();"
+            "dt.items.add(file);"
+            "input.files = dt.files;"
+            "input.dispatchEvent(new Event('change', {bubbles: true}));"
+            f"return JSON.stringify({{ok: true, filename: {js_filename}, size: bytes.length}});"
+            "})()"
+        )
+
+        resp = await self.send(
+            {"method": "Runtime.evaluate", "params": {"expression": js_expr, "returnByValue": True}}
+        )
+
+        value = resp.get("result", {}).get("value", "")
+        if isinstance(value, str):
+            parsed = json.loads(value)
+        else:
+            parsed = value
+
+        if "error" in parsed:
+            raise ValueError(parsed["error"])
+
+        return parsed
 
     def set_human(self, profile) -> "HumanProfile | None":
         prev = self._humanizer.profile if self._humanizer else None

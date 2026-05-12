@@ -305,6 +305,26 @@ async def _cmd_configure(args: argparse.Namespace) -> None:
             await client._ws.close()
 
 
+async def _cmd_upload(args: argparse.Namespace) -> None:
+    file_path = Path(args.file_path)
+    if not file_path.is_file():
+        _err(f"file not found: {args.file_path}")
+        sys.exit(1)
+    api_key = _get_api_key()
+    client, browser = await _resume_browser(api_key, args.session_id)
+    try:
+        result = await browser.upload(
+            args.selector, file_path, filename=args.filename
+        )
+        _out(result)
+    except ValueError as e:
+        _err(str(e))
+        sys.exit(1)
+    finally:
+        if client._ws:
+            await client._ws.close()
+
+
 async def _cmd_cdp(args: argparse.Namespace) -> None:
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
@@ -406,6 +426,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_configure.add_argument("--masking-mode", help="Masking mode (true/false)")
     p_configure.add_argument("--fingerprint", help="Fingerprint (true/false)")
 
+    p_upload = sub.add_parser("upload", help="Upload file to input[type=file]")
+    p_upload.add_argument("session_id")
+    p_upload.add_argument("--selector", required=True, help="CSS selector for file input")
+    p_upload.add_argument("--file", required=True, dest="file_path", help="Path to file")
+    p_upload.add_argument("--filename", help="Override filename (default: basename)")
+
     p_cdp = sub.add_parser("cdp", help="Send raw CDP command")
     p_cdp.add_argument("session_id", help="Session ID")
     p_cdp.add_argument("--method", required=True, help="CDP method name")
@@ -434,6 +460,7 @@ def main() -> None:
         "switch-tab": _cmd_switch_tab,
         "configure": _cmd_configure,
         "cdp": _cmd_cdp,
+        "upload": _cmd_upload,
     }
 
     handler = handlers.get(args.command)
