@@ -46,3 +46,15 @@ class ProviderOffline(CekiError):
 class ProviderDisconnected(CekiError):
     """Provider's browser disconnected during rental and didn't reconnect within grace period."""
     pass
+
+
+class SessionNotFound(CekiError):
+    pass
+
+
+class SessionExpired(SessionNotFound):
+    pass
+
+
+class NotOwner(CekiError):
+    pass

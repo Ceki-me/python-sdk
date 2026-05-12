@@ -17,7 +17,7 @@ from ._exceptions import (
     RateLimitExceeded,
     SessionEnded,
 )
-from ._models import Match
+from ._models import Match, Snapshot
 
 log = logging.getLogger(__name__)
 
@@ -72,6 +72,7 @@ class Browser:
             human = env_path
         self._humanizer = _resolve_human(human)
         self._last_pointer: tuple[int, int] | None = None
+        self._last_seen_ts: str | None = None
 
     @property
     def session_id(self) -> str:
@@ -230,6 +231,15 @@ class Browser:
         import base64 as _b64
         data = resp.get("data", "")
         return _b64.b64decode(data) if data else b""
+
+    async def snapshot(self) -> Snapshot:
+        from datetime import datetime, timezone
+        resp = await self.send({"method": "Page.captureScreenshot"})
+        screenshot_b64 = resp.get("data", "")
+        new_msgs = await self.chat.history(since=self._last_seen_ts)
+        if new_msgs:
+            self._last_seen_ts = new_msgs[-1].created_at
+        return Snapshot(screenshot=screenshot_b64, chat=new_msgs, ts=datetime.now(timezone.utc))
 
     def set_human(self, profile) -> "HumanProfile | None":
         prev = self._humanizer.profile if self._humanizer else None

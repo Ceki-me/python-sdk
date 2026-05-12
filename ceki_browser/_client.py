@@ -16,8 +16,11 @@ from ._exceptions import (
     CdpUnrecoverable,
     ConnectionLost,
     InsufficientFunds,
+    NotOwner,
     RateLimitExceeded,
     SessionEnded,
+    SessionExpired,
+    SessionNotFound,
 )
 from ._models import BrowserOption, Match
 
@@ -50,6 +53,7 @@ class Client:
         self._reader_task: asyncio.Task[None] | None = None
         self._pending_rents: dict[str, asyncio.Future[Match]] = {}
         self._pending_rent_queue: list[asyncio.Future[Match]] = []
+        self._pending_resumes: dict[str, asyncio.Future[dict]] = {}
         self._active_browsers: dict[str, Browser] = {}
         self._backoff_attempt = 0
         self._last_pong = 0.0
@@ -140,6 +144,20 @@ class Client:
             await browser.configure(masking_mode=False)
         if not fingerprint:
             await browser.configure(fingerprint=False)
+        return browser
+
+    async def resume(self, session_id: str, *, human="natural") -> Browser:
+        fut: asyncio.Future[dict] = asyncio.get_event_loop().create_future()
+        self._pending_resumes[session_id] = fut
+        await self._ws_send({"type": "resume", "session_id": session_id})
+        try:
+            resp = await asyncio.wait_for(fut, timeout=10)
+        except asyncio.TimeoutError:
+            self._pending_resumes.pop(session_id, None)
+            raise TimeoutError("resume timed out")
+        match = Match.model_validate(resp)
+        browser = Browser(client=self, match=match, human=human)
+        self._active_browsers[match.session_id] = browser
         return browser
 
     async def close(self) -> None:
@@ -251,6 +269,26 @@ class Client:
             fut = self._pending_rents.pop(server_event_id, None)
             if fut and not fut.done():
                 fut.set_result(Match.model_validate(msg))
+            return
+        if mtype == "resume_ok":
+            sid = msg.get("session_id", "")
+            fut = self._pending_resumes.pop(sid, None)
+            if fut and not fut.done():
+                fut.set_result(msg)
+            return
+        if mtype == "resume_failed":
+            sid = msg.get("session_id", "")
+            reason = msg.get("reason", "unknown")
+            fut = self._pending_resumes.pop(sid, None)
+            exc: Exception
+            if reason == "not_owner":
+                exc = NotOwner(f"session {sid}: not owner")
+            elif reason == "expired":
+                exc = SessionExpired(f"session {sid}: expired")
+            else:
+                exc = SessionNotFound(f"session {sid}: {reason}")
+            if fut and not fut.done():
+                fut.set_exception(exc)
             return
         if mtype == "cdp_response":
             session_id = msg.get("session_id", "")

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -56,3 +58,9 @@ class ReadReceipt(BaseModel):
     topic_id: str
     last_read_message_id: str
     read_at: float = 0.0
+
+
+class Snapshot(BaseModel):
+    screenshot: str
+    chat: list[ChatMessage] = []
+    ts: datetime

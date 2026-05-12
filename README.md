@@ -180,6 +180,83 @@ browser.set_human(None)               # Disable mid-session
 - `CEKI_HUMAN_PROFILE_PATH` — Path to custom JSON profile file
 - `CEKI_HUMAN_DISABLE=1` — Disable humanization entirely
 
+## Using from shell / AI agents
+
+The `ceki-browser` CLI lets AI agents (Claude Code, etc.) control a rented browser from plain shell commands. Each command is a short-lived process — the session persists on the server between calls.
+
+```bash
+pip install ceki-browser
+export CEKI_API_KEY=your_key
+```
+
+### Example 1: Rent + signup flow
+
+```bash
+# Rent a browser
+SESSION=$(ceki-browser rent --schedule 42 | jq -r .session_id)
+
+# Navigate and interact
+ceki-browser navigate $SESSION "https://example.com/signup"
+ceki-browser snapshot $SESSION -o /tmp/page.png
+# (AI reads screenshot, decides where to click)
+ceki-browser click $SESSION 350 420
+ceki-browser type $SESSION "user@example.com"
+ceki-browser click $SESSION 350 480
+ceki-browser type $SESSION "securepassword123"
+ceki-browser click $SESSION 400 550
+ceki-browser snapshot $SESSION -o /tmp/after.png
+
+# Done
+ceki-browser stop $SESSION
+```
+
+### Example 2: Captcha handoff to provider
+
+```bash
+ceki-browser chat $SESSION send "Please solve the captcha on screen"
+# Wait up to 5 minutes for provider response
+REPLY=$(ceki-browser chat $SESSION next --timeout=300)
+# $REPLY is JSON: {"from": 123, "text": "done", "ts": "..."} or null on timeout
+```
+
+### Example 3: Multi-step with snapshot control
+
+```bash
+for step in navigate click type; do
+  # ... perform action ...
+  SNAP=$(ceki-browser snapshot $SESSION -o /tmp/step.png)
+  CHAT=$(echo "$SNAP" | jq -r '.chat')
+  # AI reads /tmp/step.png and $CHAT, decides next action
+done
+```
+
+### Subcommands
+
+| Command | Description | Exit |
+|---|---|---|
+| `rent --schedule N` | Rent browser, print session JSON | 0 |
+| `snapshot <sid> -o PATH` | Screenshot + new chat messages | 0 |
+| `navigate <sid> <url>` | Navigate to URL | 0 |
+| `click <sid> <x> <y>` | Click at coordinates | 0 |
+| `type <sid> "<text>"` | Type text (add `--natural` for human-like) | 0 |
+| `scroll <sid> <x> <y> <dy>` | Scroll at position | 0 |
+| `chat <sid> send "<text>"` | Send chat message | 0 |
+| `chat <sid> next [--timeout=60]` | Wait for next message (null on timeout) | 0 |
+| `stop <sid>` | End session | 0 |
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | Generic error |
+| 2 | Auth error (missing `CEKI_API_KEY`) |
+| 3 | Session not found / expired / not owner |
+| 4 | Timeout |
+| 5 | Network / WebSocket error |
+
+All output is JSON on stdout. Errors go to stderr as `{"error":"...","code":"..."}`.
+
 ## Development
 
 ```bash

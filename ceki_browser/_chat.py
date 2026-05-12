@@ -121,6 +121,7 @@ class BrowserChat:
         self,
         limit: int = 50,
         before_id: int | None = None,
+        since: str | None = None,
     ) -> list[ChatMessage]:
         if not self._topic_id:
             return []
@@ -129,6 +130,8 @@ class BrowserChat:
         params: dict = {"topic_id": self._topic_id, "limit": limit}
         if before_id is not None:
             params["before"] = before_id
+        if since is not None:
+            params["since"] = since
         req = httpx.Request(
             "GET",
             f"{base}/messages",
