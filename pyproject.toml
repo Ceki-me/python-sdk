@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ceki-browser"
-version = "2.3.2"
+version = "2.3.3"
 description = "Python SDK for ceki.me browser rental"
 readme = "README.md"
 license = {text = "MIT"}

@@ -71,6 +71,7 @@ class Browser:
         elif human == "natural" and env_path:
             human = env_path
         self._humanizer = _resolve_human(human)
+        self._last_pointer: tuple[int, int] | None = None
 
     @property
     def session_id(self) -> str:
@@ -180,11 +181,16 @@ class Browser:
         await self.send({"method": "Input.dispatchMouseEvent", "params": {
             "type": "mouseReleased", "x": int(x), "y": int(y), "button": "left", "clickCount": 1,
         }})
+        self._last_pointer = (int(x), int(y))
         if self._humanizer:
             await self._humanizer.after("click")
 
     async def type(self, text: str) -> None:
         if self._humanizer:
+            if self._last_pointer is not None:
+                await self.click(*self._last_pointer)
+            else:
+                log.debug("type() called with humanizer but no last_pointer; falling back to plain insertText")
             await self._humanizer.before("type")
             async for char, delay_ms in self._humanizer.humanize_text(text):
                 await self.send({"method": "Input.insertText", "params": {"text": char}})
@@ -202,6 +208,7 @@ class Browser:
         await self.send({"method": "Input.dispatchMouseEvent", "params": {
             "type": "mouseWheel", "x": x, "y": y, "deltaX": delta_x, "deltaY": delta_y,
         }})
+        self._last_pointer = (int(x), int(y))
         if self._humanizer:
             await self._humanizer.after("scroll")
 
