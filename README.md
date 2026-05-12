@@ -230,6 +230,44 @@ for step in navigate click type; do
 done
 ```
 
+### Example 4: Profile export/import across sessions
+
+```bash
+# First session: login and export profile
+SESSION=$(ceki-browser rent --schedule 42 | jq -r .session_id)
+ceki-browser navigate $SESSION "https://reddit.com/login"
+# ... perform login ...
+ceki-browser profile $SESSION export -o /tmp/reddit_profile.json --domains ".reddit.com,reddit.com"
+ceki-browser stop $SESSION
+
+# Next session: restore profile
+SESSION=$(ceki-browser rent --schedule 42 | jq -r .session_id)
+ceki-browser profile $SESSION import -i /tmp/reddit_profile.json
+ceki-browser navigate $SESSION "https://reddit.com"
+# Already logged in
+```
+
+### Example 5: Search for browsers and send raw CDP
+
+```bash
+# Find browsers in US region
+ceki-browser search --limit 5 --filter region=US
+
+# Send raw CDP command
+ceki-browser cdp $SESSION --method Page.navigate --params '{"url":"https://example.com"}'
+```
+
+### Example 6: Screenshot and wait
+
+```bash
+# Save screenshot as PNG
+ceki-browser screenshot $SESSION -o /tmp/page.png
+
+# Wait for session to end (blocks until provider ends or timeout)
+RESULT=$(ceki-browser wait $SESSION)
+echo $RESULT  # {"ended": true, "reason": "..."}
+```
+
 ### Subcommands
 
 | Command | Description | Exit |
@@ -242,7 +280,17 @@ done
 | `scroll <sid> <x> <y> <dy>` | Scroll at position | 0 |
 | `chat <sid> send "<text>"` | Send chat message | 0 |
 | `chat <sid> next [--timeout=60]` | Wait for next message (null on timeout) | 0 |
+| `chat <sid> history [--since TS] [--limit N]` | Get chat history (no side effects) | 0 |
+| `chat <sid> send-image --image PATH [--text "..."]` | Send image (optionally with text) | 0 |
 | `stop <sid>` | End session | 0 |
+| `profile <sid> export -o FILE [--domains D] [--no-session-storage]` | Export cookies + storage to JSON | 0 |
+| `profile <sid> import -i FILE` | Import cookies + storage from JSON | 0 |
+| `search [--limit N] [--filter key=val]...` | Search available browsers | 0 |
+| `wait <sid>` | Block until session ends | 0 |
+| `screenshot <sid> -o FILE [--format png\|jpeg]` | Save screenshot to file | 0 |
+| `switch-tab <sid>` | Switch browser tab | 0 |
+| `configure <sid> [--masking-mode V] [--fingerprint V]` | Configure session settings | 0 |
+| `cdp <sid> --method M [--params JSON]` | Send raw CDP command | 0 |
 
 ### Exit codes
 

@@ -119,6 +119,176 @@ def test_parser_stop():
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# New subcommand parser tests
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def test_parser_profile_export():
+    parser = build_parser()
+    args = parser.parse_args([
+        "profile", "ses-1", "export", "-o", "/tmp/p.json",
+        "--domains", ".reddit.com,reddit.com",
+    ])
+    assert args.command == "profile"
+    assert args.session_id == "ses-1"
+    assert args.profile_action == "export"
+    assert args.output == "/tmp/p.json"
+    assert args.domains == ".reddit.com,reddit.com"
+    assert args.no_session_storage is False
+
+
+def test_parser_profile_export_no_session_storage():
+    parser = build_parser()
+    args = parser.parse_args([
+        "profile", "ses-1", "export", "-o", "/tmp/p.json", "--no-session-storage",
+    ])
+    assert args.no_session_storage is True
+
+
+def test_parser_profile_import():
+    parser = build_parser()
+    args = parser.parse_args(["profile", "ses-1", "import", "-i", "/tmp/p.json"])
+    assert args.command == "profile"
+    assert args.profile_action == "import"
+    assert args.input == "/tmp/p.json"
+
+
+def test_parser_search():
+    parser = build_parser()
+    args = parser.parse_args([
+        "search", "--limit", "5", "--filter", "region=US", "--filter", "price_max=0.5",
+    ])
+    assert args.command == "search"
+    assert args.limit == 5
+    assert args.filter == ["region=US", "price_max=0.5"]
+
+
+def test_parser_search_defaults():
+    parser = build_parser()
+    args = parser.parse_args(["search"])
+    assert args.limit == 20
+    assert args.filter is None
+
+
+def test_parser_chat_history():
+    parser = build_parser()
+    args = parser.parse_args([
+        "chat", "ses-1", "history", "--since", "2026-01-01T00:00:00Z", "--limit", "20",
+    ])
+    assert args.command == "chat"
+    assert args.chat_action == "history"
+    assert args.since == "2026-01-01T00:00:00Z"
+    assert args.limit == 20
+
+
+def test_parser_wait():
+    parser = build_parser()
+    args = parser.parse_args(["wait", "ses-1"])
+    assert args.command == "wait"
+    assert args.session_id == "ses-1"
+
+
+def test_parser_chat_send_image():
+    parser = build_parser()
+    args = parser.parse_args(["chat", "ses-1", "send-image", "--image", "/tmp/img.png"])
+    assert args.command == "chat"
+    assert args.chat_action == "send-image"
+    assert args.image == "/tmp/img.png"
+    assert args.text is None
+
+
+def test_parser_chat_send_image_with_text():
+    parser = build_parser()
+    args = parser.parse_args([
+        "chat", "ses-1", "send-image", "--image", "/tmp/img.png", "--text", "look at this",
+    ])
+    assert args.text == "look at this"
+
+
+def test_parser_screenshot():
+    parser = build_parser()
+    args = parser.parse_args(["screenshot", "ses-1", "-o", "/tmp/s.png", "--format", "jpeg"])
+    assert args.command == "screenshot"
+    assert args.session_id == "ses-1"
+    assert args.output == "/tmp/s.png"
+    assert args.format == "jpeg"
+
+
+def test_parser_screenshot_default_format():
+    parser = build_parser()
+    args = parser.parse_args(["screenshot", "ses-1", "-o", "/tmp/s.png"])
+    assert args.format == "png"
+
+
+def test_parser_switch_tab():
+    parser = build_parser()
+    args = parser.parse_args(["switch-tab", "ses-1"])
+    assert args.command == "switch-tab"
+    assert args.session_id == "ses-1"
+
+
+def test_parser_configure():
+    parser = build_parser()
+    args = parser.parse_args([
+        "configure", "ses-1", "--masking-mode", "true", "--fingerprint", "false",
+    ])
+    assert args.command == "configure"
+    assert args.session_id == "ses-1"
+    assert args.masking_mode == "true"
+    assert args.fingerprint == "false"
+
+
+def test_parser_configure_partial():
+    parser = build_parser()
+    args = parser.parse_args(["configure", "ses-1", "--masking-mode", "true"])
+    assert args.masking_mode == "true"
+    assert args.fingerprint is None
+
+
+def test_parser_cdp():
+    parser = build_parser()
+    args = parser.parse_args([
+        "cdp", "ses-1", "--method", "Page.navigate",
+        "--params", '{"url":"https://example.com"}',
+    ])
+    assert args.command == "cdp"
+    assert args.session_id == "ses-1"
+    assert args.method == "Page.navigate"
+    assert args.params == '{"url":"https://example.com"}'
+
+
+def test_parser_cdp_no_params():
+    parser = build_parser()
+    args = parser.parse_args(["cdp", "ses-1", "--method", "Page.reload"])
+    assert args.method == "Page.reload"
+    assert args.params is None
+
+
+def test_search_domains_parsing():
+    """Verify --domains comma-split logic in profile export."""
+    parser = build_parser()
+    args = parser.parse_args([
+        "profile", "ses-1", "export", "-o", "/tmp/p.json",
+        "--domains", ".reddit.com,reddit.com,www.reddit.com",
+    ])
+    domains = [d.strip() for d in args.domains.split(",")]
+    assert domains == [".reddit.com", "reddit.com", "www.reddit.com"]
+
+
+def test_search_filter_parsing():
+    """Verify --filter key=val parsing logic."""
+    parser = build_parser()
+    args = parser.parse_args([
+        "search", "--filter", "region=US", "--filter", "price_max=0.5",
+    ])
+    filters = {}
+    for f in args.filter:
+        k, v = f.split("=", 1)
+        filters[k] = v
+    assert filters == {"region": "US", "price_max": "0.5"}
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # Exit code: missing CEKI_API_KEY
 # ──────────────────────────────────────────────────────────────────────────
 

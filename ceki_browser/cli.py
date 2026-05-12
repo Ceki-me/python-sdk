@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 from . import connect, ConnectOptions
@@ -179,6 +180,22 @@ async def _cmd_chat(args: argparse.Namespace) -> None:
                     _out(result_msg)
                 except asyncio.TimeoutError:
                     _out(None)
+        elif args.chat_action == "history":
+            since = None
+            if args.since:
+                try:
+                    ts_val = float(args.since)
+                    from datetime import datetime, timezone
+                    since = datetime.fromtimestamp(ts_val, tz=timezone.utc).isoformat()
+                except ValueError:
+                    since = args.since
+            msgs = await browser.chat.history(since=since, limit=args.limit)
+            _out([{"from": m.sender_id, "text": m.text, "ts": m.created_at} for m in msgs])
+        elif args.chat_action == "send-image":
+            if args.text:
+                await browser.chat.send(args.text)
+            result = await browser.chat.send_image(Path(args.image))
+            _out({"ok": True, "message_id": result.get("message_id")})
     finally:
         if client._ws:
             await client._ws.close()
@@ -191,6 +208,110 @@ async def _cmd_stop(args: argparse.Namespace) -> None:
         await browser.close()
         delete_session(args.session_id)
         _out({"ok": True})
+    finally:
+        if client._ws:
+            await client._ws.close()
+
+
+async def _cmd_profile(args: argparse.Namespace) -> None:
+    api_key = _get_api_key()
+    client, browser = await _resume_browser(api_key, args.session_id)
+    try:
+        if args.profile_action == "export":
+            domains = None
+            if args.domains:
+                domains = [d.strip() for d in args.domains.split(",")]
+            include_session_storage = not args.no_session_storage
+            profile = await browser.profile.export(
+                domains=domains,
+                include_session_storage=include_session_storage,
+            )
+            with open(args.output, "w") as f:
+                json.dump(profile, f)
+            _out({"ok": True, "path": args.output})
+        elif args.profile_action == "import":
+            with open(args.input, "r") as f:
+                profile_dict = json.load(f)
+            await browser.profile.import_(profile_dict)
+            _out({"ok": True})
+    finally:
+        if client._ws:
+            await client._ws.close()
+
+
+async def _cmd_search(args: argparse.Namespace) -> None:
+    api_key = _get_api_key()
+    client = await connect(api_key, _connect_options())
+    try:
+        filters: dict[str, str] = {}
+        for f in (args.filter or []):
+            k, v = f.split("=", 1)
+            filters[k] = v
+        results = await client.search(filters=filters, limit=args.limit)
+        _out([r.model_dump() for r in results])
+    finally:
+        if client._ws:
+            await client._ws.close()
+
+
+async def _cmd_wait(args: argparse.Namespace) -> None:
+    api_key = _get_api_key()
+    client, browser = await _resume_browser(api_key, args.session_id)
+    try:
+        reason = await browser.wait_until_ended()
+        _out({"ended": True, "reason": reason})
+    finally:
+        if client._ws:
+            await client._ws.close()
+
+
+async def _cmd_screenshot(args: argparse.Namespace) -> None:
+    api_key = _get_api_key()
+    client, browser = await _resume_browser(api_key, args.session_id)
+    try:
+        data = await browser.screenshot(format="png")
+        with open(args.output, "wb") as f:
+            f.write(data)
+        _out({"ok": True, "path": args.output})
+    finally:
+        if client._ws:
+            await client._ws.close()
+
+
+async def _cmd_switch_tab(args: argparse.Namespace) -> None:
+    api_key = _get_api_key()
+    client, browser = await _resume_browser(api_key, args.session_id)
+    try:
+        await browser.switch_tab()
+        _out({"ok": True})
+    finally:
+        if client._ws:
+            await client._ws.close()
+
+
+async def _cmd_configure(args: argparse.Namespace) -> None:
+    api_key = _get_api_key()
+    client, browser = await _resume_browser(api_key, args.session_id)
+    try:
+        kwargs: dict[str, Any] = {}
+        if args.masking_mode is not None:
+            kwargs["masking_mode"] = args.masking_mode
+        if args.fingerprint is not None:
+            kwargs["fingerprint"] = args.fingerprint
+        await browser.configure(**kwargs)
+        _out({"ok": True})
+    finally:
+        if client._ws:
+            await client._ws.close()
+
+
+async def _cmd_cdp(args: argparse.Namespace) -> None:
+    api_key = _get_api_key()
+    client, browser = await _resume_browser(api_key, args.session_id)
+    try:
+        params = json.loads(args.params) if args.params else {}
+        result = await browser.send({"method": args.method, "params": params})
+        _out(result)
     finally:
         if client._ws:
             await client._ws.close()
@@ -238,8 +359,57 @@ def build_parser() -> argparse.ArgumentParser:
     p_next = chat_sub.add_parser("next", help="Wait for next message")
     p_next.add_argument("--timeout", type=float, default=60, help="Timeout in seconds")
 
+    p_history = chat_sub.add_parser("history", help="Get chat history")
+    p_history.add_argument("--since", help="Timestamp (Unix or ISO-8601)")
+    p_history.add_argument("--limit", type=int, default=50, help="Max messages")
+
+    p_send_image = chat_sub.add_parser("send-image", help="Send image to chat")
+    p_send_image.add_argument("--image", required=True, help="Path to image file")
+    p_send_image.add_argument("--text", help="Optional text to send before image")
+
     p_stop = sub.add_parser("stop", help="End session")
     p_stop.add_argument("session_id", help="Session ID")
+
+    p_profile = sub.add_parser("profile", help="Profile export/import")
+    p_profile.add_argument("session_id", help="Session ID")
+    profile_sub = p_profile.add_subparsers(dest="profile_action", required=True)
+
+    p_profile_export = profile_sub.add_parser("export", help="Export profile to file")
+    p_profile_export.add_argument("-o", "--output", required=True, help="Output JSON path")
+    p_profile_export.add_argument("--domains", help="Comma-separated domain filter")
+    p_profile_export.add_argument(
+        "--no-session-storage", action="store_true", help="Exclude sessionStorage"
+    )
+
+    p_profile_import = profile_sub.add_parser("import", help="Import profile from file")
+    p_profile_import.add_argument("-i", "--input", required=True, help="Input JSON path")
+
+    p_search = sub.add_parser("search", help="Search available browsers")
+    p_search.add_argument("--limit", type=int, default=20, help="Max results")
+    p_search.add_argument("--filter", action="append", help="Filter key=val (repeatable)")
+
+    p_wait = sub.add_parser("wait", help="Wait until session ends")
+    p_wait.add_argument("session_id", help="Session ID")
+
+    p_screenshot = sub.add_parser("screenshot", help="Take screenshot and save to file")
+    p_screenshot.add_argument("session_id", help="Session ID")
+    p_screenshot.add_argument("-o", "--output", required=True, help="Output file path")
+    p_screenshot.add_argument(
+        "--format", choices=["png", "jpeg"], default="png", help="Image format"
+    )
+
+    p_switch_tab = sub.add_parser("switch-tab", help="Switch browser tab")
+    p_switch_tab.add_argument("session_id", help="Session ID")
+
+    p_configure = sub.add_parser("configure", help="Configure session settings")
+    p_configure.add_argument("session_id", help="Session ID")
+    p_configure.add_argument("--masking-mode", help="Masking mode (true/false)")
+    p_configure.add_argument("--fingerprint", help="Fingerprint (true/false)")
+
+    p_cdp = sub.add_parser("cdp", help="Send raw CDP command")
+    p_cdp.add_argument("session_id", help="Session ID")
+    p_cdp.add_argument("--method", required=True, help="CDP method name")
+    p_cdp.add_argument("--params", help="CDP params as JSON string")
 
     return parser
 
@@ -257,6 +427,13 @@ def main() -> None:
         "scroll": _cmd_scroll,
         "chat": _cmd_chat,
         "stop": _cmd_stop,
+        "profile": _cmd_profile,
+        "search": _cmd_search,
+        "wait": _cmd_wait,
+        "screenshot": _cmd_screenshot,
+        "switch-tab": _cmd_switch_tab,
+        "configure": _cmd_configure,
+        "cdp": _cmd_cdp,
     }
 
     handler = handlers.get(args.command)
