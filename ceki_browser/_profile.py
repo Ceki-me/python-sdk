@@ -9,15 +9,17 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+SUPPORTED_SCHEMA_VERSIONS = {1, 2}
+
 
 class BrowserProfile:
-    """Sugar layer for cookies + localStorage + sessionStorage snapshot/restore.
+    """Sugar layer for cookies + localStorage + sessionStorage + fingerprint snapshot/restore.
 
     Profile data stays agent-side. Server doesn't store it. Provider sees plaintext
     only during the active session (same as without profile).
     """
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def __init__(self, browser: "Browser") -> None:
         self._browser = browser
@@ -28,7 +30,7 @@ class BrowserProfile:
         domains: list[str] | None = None,
         include_session_storage: bool = True,
     ) -> dict[str, Any]:
-        """Export current session state (cookies + localStorage + sessionStorage).
+        """Export current session state (cookies + localStorage + sessionStorage + fingerprint).
 
         domains: filter cookies by domain (e.g., ['.reddit.com', 'reddit.com']).
                  None = all cookies. localStorage/sessionStorage exported only
@@ -36,6 +38,9 @@ class BrowserProfile:
         include_session_storage: set False to skip sessionStorage (e.g., to avoid
                  capturing tab-transient state).
         """
+        fp_resp = await self._browser.send({"method": "Browser.getFingerprint"})
+        fingerprint = fp_resp.get("fingerprint")
+
         cookies_resp = await self._browser.send({"method": "Network.getCookies"})
         cookies = cookies_resp.get("cookies", [])
         if domains is not None:
@@ -55,6 +60,7 @@ class BrowserProfile:
 
         return {
             "schema_version": self.SCHEMA_VERSION,
+            "fingerprint": fingerprint,
             "origin": origin,
             "cookies": cookies,
             "localStorage": local_storage,
@@ -64,14 +70,17 @@ class BrowserProfile:
     async def import_(self, profile: dict[str, Any]) -> None:
         """Restore cookies + storage into the current session.
 
+        Fingerprint is NOT applied here — it must be passed to client.rent(fingerprint=...)
+        before the session starts. This method only restores cookies + storage.
+
         Cookies can be set before first navigation (they are domain-scoped).
         localStorage/sessionStorage require a document context — navigate to the
         target origin first, then call import_().
         """
         version = profile.get("schema_version", 1)
-        if version != self.SCHEMA_VERSION:
+        if version not in SUPPORTED_SCHEMA_VERSIONS:
             raise ValueError(
-                f"unsupported profile schema_version={version}, expected {self.SCHEMA_VERSION}"
+                f"unsupported profile schema_version={version}, expected one of {SUPPORTED_SCHEMA_VERSIONS}"
             )
 
         cookies = profile.get("cookies", [])

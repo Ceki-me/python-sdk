@@ -126,7 +126,14 @@ class Client:
         items = data.get("data", data) if isinstance(data, dict) else data
         return [BrowserOption.model_validate(x) for x in items]
 
-    async def rent(self, schedule_id: int, *, human="natural", masking_mode: bool = True, fingerprint: bool = True) -> Browser:
+    async def rent(
+        self,
+        schedule_id: int,
+        *,
+        human="natural",
+        masking_mode: bool = True,
+        fingerprint: bool | dict | None = True,
+    ) -> Browser:
         fut: asyncio.Future[Match] = asyncio.get_event_loop().create_future()
         self._pending_rent_queue.append(fut)
         await self._ws_send({"type": "rent", "schedule_id": schedule_id})
@@ -142,7 +149,9 @@ class Client:
         self._active_browsers[match.session_id] = browser
         if not masking_mode:
             await browser.configure(masking_mode=False)
-        if not fingerprint:
+        if isinstance(fingerprint, dict):
+            await browser.configure(fingerprint=fingerprint)
+        elif fingerprint is False or fingerprint is None:
             await browser.configure(fingerprint=False)
         return browser
 
