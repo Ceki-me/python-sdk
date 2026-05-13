@@ -274,7 +274,7 @@ async def _cmd_screenshot(args: argparse.Namespace) -> None:
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
-        data = await browser.screenshot(format="png")
+        data = await browser.screenshot(format="png", full_page=args.full)
         with open(args.output, "wb") as f:
             f.write(data)
         _out({"ok": True, "path": args.output})
@@ -422,6 +422,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_screenshot.add_argument("-o", "--output", required=True, help="Output file path")
     p_screenshot.add_argument(
         "--format", choices=["png", "jpeg"], default="png", help="Image format"
+    )
+    p_screenshot.add_argument(
+        "--full", action="store_true", default=False, help="Capture full page, not just viewport"
     )
 
     p_switch_tab = sub.add_parser("switch-tab", help="Switch browser tab")

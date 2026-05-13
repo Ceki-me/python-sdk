@@ -216,17 +216,37 @@ class Browser:
         if self._humanizer:
             await self._humanizer.after("scroll")
 
-    async def screenshot(self, *, format: Literal["base64", "png"] = "base64") -> dict | bytes:
+    async def screenshot(
+        self,
+        *,
+        format: Literal["base64", "png"] = "base64",
+        full_page: bool = False,
+    ) -> dict | bytes:
         """Take a screenshot.
 
         Args:
             format: ``"base64"`` (default) returns CDP-shape dict, ``"png"`` returns raw PNG bytes.
+            full_page: If True, capture the entire scrollable page, not just the viewport.
         """
         if format not in ("base64", "png"):
             raise ValueError(f"Unsupported format: {format!r}. Use 'base64' or 'png'.")
         if self._humanizer:
             await self._humanizer.before("screenshot")
-        resp = await self.send({"method": "Page.captureScreenshot"})
+
+        params: dict[str, Any] = {}
+        if full_page:
+            metrics = await self.send({"method": "Page.getLayoutMetrics"})
+            content = metrics.get("contentSize", {})
+            width = int(content.get("width", 0))
+            height = int(content.get("height", 0))
+            MAX_HEIGHT = 16384
+            if height > MAX_HEIGHT:
+                log.warning("full_page screenshot height=%d clamped to %d", height, MAX_HEIGHT)
+                height = MAX_HEIGHT
+            params["captureBeyondViewport"] = True
+            params["clip"] = {"x": 0, "y": 0, "width": width, "height": height, "scale": 1}
+
+        resp = await self.send({"method": "Page.captureScreenshot", "params": params})
         if self._humanizer:
             await self._humanizer.after("screenshot")
         if format == "base64":
