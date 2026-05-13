@@ -124,6 +124,24 @@ async def test_export_fingerprint_null_when_disabled():
 
 
 @pytest.mark.asyncio
+async def test_export_fingerprint_fallback_on_old_extension():
+    """When Browser.getFingerprint is not available, export falls back to fingerprint=None."""
+    fb = FakeBrowser()
+    fb.send.side_effect = [
+        Exception("CDP error: Browser.getFingerprint wasn't found"),
+        {"cookies": [{"name": "x", "value": "y", "domain": ".example.com"}]},
+        {"result": {"value": "{}"}},
+        {"result": {"value": "{}"}},
+        {"result": {"value": "https://example.com"}},
+    ]
+    p = BrowserProfile(fb)
+    blob = await p.export()
+    assert blob["schema_version"] == 2
+    assert blob["fingerprint"] is None
+    assert len(blob["cookies"]) == 1
+
+
+@pytest.mark.asyncio
 async def test_import_v2_full():
     fb = FakeBrowser()
     fb.send.return_value = {}

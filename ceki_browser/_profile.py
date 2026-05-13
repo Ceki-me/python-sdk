@@ -38,8 +38,12 @@ class BrowserProfile:
         include_session_storage: set False to skip sessionStorage (e.g., to avoid
                  capturing tab-transient state).
         """
-        fp_resp = await self._browser.send({"method": "Browser.getFingerprint"})
-        fingerprint = fp_resp.get("fingerprint")
+        try:
+            fp_resp = await self._browser.send({"method": "Browser.getFingerprint"})
+            fingerprint = fp_resp.get("fingerprint")
+        except Exception:
+            log.warning("profile.export: Browser.getFingerprint not available (extension too old?)")
+            fingerprint = None
 
         cookies_resp = await self._browser.send({"method": "Network.getCookies"})
         cookies = cookies_resp.get("cookies", [])
