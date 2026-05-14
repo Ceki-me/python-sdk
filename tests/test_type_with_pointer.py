@@ -41,7 +41,7 @@ def browser_no_human():
 
 
 async def test_humanizer_on_with_pointer_clicks_before_type(browser_humanized: Browser):
-    """humanizer ON + last_pointer set → click() before insertText."""
+    """humanizer ON + last_pointer set → click() before dispatchKeyEvent."""
     sent: list[dict] = []
 
     async def fake_send(cdp, **kw):
@@ -54,20 +54,25 @@ async def test_humanizer_on_with_pointer_clicks_before_type(browser_humanized: B
     await browser_humanized.type("ab")
 
     mouse_events = [s for s in sent if s["method"] == "Input.dispatchMouseEvent"]
-    insert_events = [s for s in sent if s["method"] == "Input.insertText"]
+    key_events = [
+        s for s in sent
+        if s["method"] == "Input.dispatchKeyEvent"
+        and s["params"]["type"] == "keyDown"
+        and s["params"].get("key") != "Shift"
+    ]
 
     assert len(mouse_events) >= 2, "should have mousePressed + mouseReleased"
     assert any(e["params"]["type"] == "mousePressed" for e in mouse_events)
     assert any(e["params"]["type"] == "mouseReleased" for e in mouse_events)
-    assert len(insert_events) == 2, "should have per-char insertText"
+    assert len(key_events) == 2, "should have per-char keyDown events"
 
     first_mouse_idx = sent.index(mouse_events[0])
-    first_insert_idx = sent.index(insert_events[0])
-    assert first_mouse_idx < first_insert_idx, "mouse events must precede insertText"
+    first_key_idx = sent.index(key_events[0])
+    assert first_mouse_idx < first_key_idx, "mouse events must precede key events"
 
 
 async def test_humanizer_on_no_pointer_no_click(browser_humanized: Browser):
-    """humanizer ON + last_pointer is None → no mouse events, just insertText."""
+    """humanizer ON + last_pointer is None → no mouse events, just dispatchKeyEvent."""
     sent: list[dict] = []
 
     async def fake_send(cdp, **kw):
@@ -80,33 +85,60 @@ async def test_humanizer_on_no_pointer_no_click(browser_humanized: Browser):
     await browser_humanized.type("x")
 
     mouse_events = [s for s in sent if s["method"] == "Input.dispatchMouseEvent"]
-    insert_events = [s for s in sent if s["method"] == "Input.insertText"]
+    key_events = [
+        s for s in sent
+        if s["method"] == "Input.dispatchKeyEvent"
+        and s["params"]["type"] == "keyDown"
+        and s["params"].get("key") != "Shift"
+    ]
 
     assert len(mouse_events) == 0, "no mouse events without last_pointer"
-    assert len(insert_events) >= 1
+    assert len(key_events) >= 1
 
 
 async def test_humanizer_off_with_pointer_no_click(browser_no_human: Browser):
-    """humanizer OFF + last_pointer set → single insertText, no click."""
+    """humanizer OFF + last_pointer set → per-char dispatchKeyEvent, no click."""
+    sent: list[dict] = []
+
+    async def fake_send(cdp, **kw):
+        sent.append(cdp)
+        return {}
+
     browser_no_human._last_pointer = (50, 60)
-    browser_no_human.send = AsyncMock(return_value={})
+    browser_no_human.send = fake_send
 
     await browser_no_human.type("hello")
 
-    calls = browser_no_human.send.call_args_list
-    assert len(calls) == 1
-    assert calls[0][0][0]["method"] == "Input.insertText"
-    assert calls[0][0][0]["params"]["text"] == "hello"
+    key_events = [s for s in sent if s["method"] == "Input.dispatchKeyEvent"]
+    keydowns = [
+        s for s in key_events
+        if s["params"]["type"] == "keyDown"
+        and s["params"].get("key") != "Shift"
+    ]
+    assert len(keydowns) == 5, "should have 5 keyDown events for 'hello'"
+    assert keydowns[0]["params"]["key"] == "h"
+    assert keydowns[4]["params"]["key"] == "o"
 
 
 async def test_humanizer_off_no_pointer_no_click(browser_no_human: Browser):
-    """humanizer OFF + no last_pointer → single insertText, no click."""
+    """humanizer OFF + no last_pointer → per-char dispatchKeyEvent, no click."""
+    sent: list[dict] = []
+
+    async def fake_send(cdp, **kw):
+        sent.append(cdp)
+        return {}
+
     assert browser_no_human._last_pointer is None
-    browser_no_human.send = AsyncMock(return_value={})
+    browser_no_human.send = fake_send
 
     await browser_no_human.type("world")
 
-    calls = browser_no_human.send.call_args_list
-    assert len(calls) == 1
-    assert calls[0][0][0]["method"] == "Input.insertText"
-    assert calls[0][0][0]["params"]["text"] == "world"
+    key_events = [s for s in sent if s["method"] == "Input.dispatchKeyEvent"]
+    keydowns = [
+        s for s in key_events
+        if s["params"]["type"] == "keyDown"
+        and s["params"].get("key") != "Shift"
+    ]
+    assert len(keydowns) == 5, "should have 5 keyDown events for 'world'"
+    assert keydowns[0]["params"]["key"] == "w"
+    assert keydowns[4]["params"]["key"] == "d"

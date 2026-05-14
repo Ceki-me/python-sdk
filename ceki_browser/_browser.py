@@ -189,6 +189,36 @@ class Browser:
         if self._humanizer:
             await self._humanizer.after("click")
 
+    async def _send_keystroke(self, char: str) -> None:
+        from .humanize.keymap import keymap_for_char
+        mapping = keymap_for_char(char)
+        if mapping is None:
+            await self.send({"method": "Input.insertText", "params": {"text": char}})
+            log.warning("Non-ASCII char %r: falling back to Input.insertText", char)
+            return
+        code, key, vk, needs_shift = mapping
+        if needs_shift:
+            await self.send({"method": "Input.dispatchKeyEvent", "params": {
+                "type": "keyDown", "key": "Shift", "code": "ShiftLeft",
+                "windowsVirtualKeyCode": 16, "nativeVirtualKeyCode": 16,
+            }})
+        await self.send({"method": "Input.dispatchKeyEvent", "params": {
+            "type": "keyDown", "key": key, "code": code,
+            "text": char, "unmodifiedText": char.lower() if needs_shift else char,
+            "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk,
+            **({"modifiers": 8} if needs_shift else {}),
+        }})
+        await self.send({"method": "Input.dispatchKeyEvent", "params": {
+            "type": "keyUp", "key": key, "code": code,
+            "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk,
+            **({"modifiers": 8} if needs_shift else {}),
+        }})
+        if needs_shift:
+            await self.send({"method": "Input.dispatchKeyEvent", "params": {
+                "type": "keyUp", "key": "Shift", "code": "ShiftLeft",
+                "windowsVirtualKeyCode": 16, "nativeVirtualKeyCode": 16,
+            }})
+
     async def type(self, text: str) -> None:
         if self._humanizer:
             if self._last_pointer is not None:
@@ -197,12 +227,13 @@ class Browser:
                 log.debug("type() called with humanizer but no last_pointer; falling back to plain insertText")
             await self._humanizer.before("type")
             async for char, delay_ms in self._humanizer.humanize_text(text):
-                await self.send({"method": "Input.insertText", "params": {"text": char}})
+                await self._send_keystroke(char)
                 if delay_ms > 0:
                     await asyncio.sleep(delay_ms / 1000)
             await self._humanizer.after("type")
         else:
-            await self.send({"method": "Input.insertText", "params": {"text": text}})
+            for char in text:
+                await self._send_keystroke(char)
 
     async def scroll(
         self, x: int = 0, y: int = 0, *, delta_x: int = 0, delta_y: int = -300
