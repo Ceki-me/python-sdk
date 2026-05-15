@@ -275,6 +275,14 @@ def test_search_domains_parsing():
     assert domains == [".reddit.com", "reddit.com", "www.reddit.com"]
 
 
+def test_cli_uses_disconnect_not_close():
+    """CLI must use client.disconnect(), not client.close(), to avoid killing active sessions."""
+    cli_path = Path(__file__).resolve().parent.parent / "ceki_browser" / "cli.py"
+    src = cli_path.read_text()
+    assert "client.disconnect()" in src
+    assert "client.close()" not in src
+
+
 def test_search_filter_parsing():
     """Verify --filter key=val parsing logic."""
     parser = build_parser()

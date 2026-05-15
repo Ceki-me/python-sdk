@@ -44,8 +44,8 @@ async def test_rent_resolves_via_rent_pending_then_match(mock_relay: MockRelaySe
     # Verify WS rent message had only type + schedule_id (no event_id, no duration_minutes)
     rent_msgs = [m for m in mock_relay.received if m.get("type") == "rent"]
     assert len(rent_msgs) == 1
-    assert set(rent_msgs[0].keys()) == {"type", "schedule_id"}
-    assert rent_msgs[0]["schedule_id"] == 240
+    assert set(rent_msgs[0].keys()) == {"type", "browser_id"}
+    assert rent_msgs[0]["browser_id"] == 240
 
     await client.close()
 
