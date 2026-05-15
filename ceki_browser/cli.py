@@ -78,7 +78,7 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
         })
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 async def _resume_browser(api_key: str, session_id: str):
@@ -105,7 +105,7 @@ async def _cmd_snapshot(args: argparse.Namespace) -> None:
         _out({"screenshot": out_path, "chat": chat_list, "ts": snap.ts.isoformat()})
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 async def _cmd_navigate(args: argparse.Namespace) -> None:
@@ -116,7 +116,7 @@ async def _cmd_navigate(args: argparse.Namespace) -> None:
         _out({"ok": True})
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 async def _cmd_click(args: argparse.Namespace) -> None:
@@ -127,7 +127,7 @@ async def _cmd_click(args: argparse.Namespace) -> None:
         _out({"ok": True, "pointer": [args.x, args.y]})
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 async def _cmd_type(args: argparse.Namespace) -> None:
@@ -141,7 +141,7 @@ async def _cmd_type(args: argparse.Namespace) -> None:
         _out({"ok": True})
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 async def _cmd_scroll(args: argparse.Namespace) -> None:
@@ -152,7 +152,7 @@ async def _cmd_scroll(args: argparse.Namespace) -> None:
         _out({"ok": True})
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 async def _cmd_chat(args: argparse.Namespace) -> None:
@@ -203,7 +203,7 @@ async def _cmd_chat(args: argparse.Namespace) -> None:
             _out({"ok": True, "message_id": result.get("message_id")})
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 async def _cmd_stop(args: argparse.Namespace) -> None:
@@ -215,7 +215,7 @@ async def _cmd_stop(args: argparse.Namespace) -> None:
         _out({"ok": True})
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 async def _cmd_profile(args: argparse.Namespace) -> None:
@@ -241,7 +241,7 @@ async def _cmd_profile(args: argparse.Namespace) -> None:
             _out({"ok": True})
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 async def _cmd_search(args: argparse.Namespace) -> None:
@@ -256,7 +256,7 @@ async def _cmd_search(args: argparse.Namespace) -> None:
         _out([r.model_dump() for r in results])
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 async def _cmd_wait(args: argparse.Namespace) -> None:
@@ -267,7 +267,7 @@ async def _cmd_wait(args: argparse.Namespace) -> None:
         _out({"ended": True, "reason": reason})
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 async def _cmd_screenshot(args: argparse.Namespace) -> None:
@@ -280,7 +280,7 @@ async def _cmd_screenshot(args: argparse.Namespace) -> None:
         _out({"ok": True, "path": args.output})
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 async def _cmd_switch_tab(args: argparse.Namespace) -> None:
@@ -291,7 +291,7 @@ async def _cmd_switch_tab(args: argparse.Namespace) -> None:
         _out({"ok": True})
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 async def _cmd_configure(args: argparse.Namespace) -> None:
@@ -307,7 +307,7 @@ async def _cmd_configure(args: argparse.Namespace) -> None:
         _out({"ok": True})
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 async def _cmd_upload(args: argparse.Namespace) -> None:
@@ -327,7 +327,7 @@ async def _cmd_upload(args: argparse.Namespace) -> None:
         sys.exit(1)
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 async def _cmd_cdp(args: argparse.Namespace) -> None:
@@ -339,7 +339,7 @@ async def _cmd_cdp(args: argparse.Namespace) -> None:
         _out(result)
     finally:
         if client._ws:
-            await client._ws.close()
+            await client.disconnect()
 
 
 def build_parser() -> argparse.ArgumentParser:
