@@ -138,7 +138,7 @@ class Client:
         self._pending_rent_queue.append(fut)
         await self._ws_send({"type": "rent", "browser_id": schedule_id})
         try:
-            match = await asyncio.wait_for(fut, timeout=60)
+            match = await asyncio.wait_for(fut, timeout=90)
         except asyncio.TimeoutError:
             try:
                 self._pending_rent_queue.remove(fut)
