@@ -181,6 +181,18 @@ class Client:
             await self._ws.close()
         self._ws = None
 
+    async def disconnect(self) -> None:
+        """Close the WS without ending active sessions (for resume-pattern)."""
+        self._closed = True
+        self._active_browsers.clear()
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            self._heartbeat_task.cancel()
+        if self._reader_task and not self._reader_task.done():
+            self._reader_task.cancel()
+        if self._ws:
+            await self._ws.close()
+        self._ws = None
+
     # ──────────────────────────────────────────────────────────────────────────
     # Internal helpers
     # ──────────────────────────────────────────────────────────────────────────
