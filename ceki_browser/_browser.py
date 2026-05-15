@@ -82,6 +82,10 @@ class Browser:
         return self._match.session_id
 
     @property
+    def browser_id(self) -> int:
+        return self._match.schedule_id
+
+    @property
     def schedule_id(self) -> int:
         return self._match.schedule_id
 

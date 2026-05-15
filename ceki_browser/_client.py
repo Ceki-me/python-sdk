@@ -136,7 +136,7 @@ class Client:
     ) -> Browser:
         fut: asyncio.Future[Match] = asyncio.get_event_loop().create_future()
         self._pending_rent_queue.append(fut)
-        await self._ws_send({"type": "rent", "schedule_id": schedule_id})
+        await self._ws_send({"type": "rent", "browser_id": schedule_id})
         try:
             match = await asyncio.wait_for(fut, timeout=60)
         except asyncio.TimeoutError:
