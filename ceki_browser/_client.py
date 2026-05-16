@@ -14,6 +14,7 @@ from ._browser import Browser
 from ._exceptions import (
     AuthFailed,
     CdpUnrecoverable,
+    CekiError,
     ConnectionLost,
     InsufficientFunds,
     NotOwner,
@@ -409,7 +410,7 @@ class Client:
         elif code == -1050:
             exc = CdpUnrecoverable(last_error=msg_text or "cdp_error")
         else:
-            exc = Exception(f"relay error {code}: {msg_text}")
+            exc = CekiError(f"relay error {code}: {msg_text}")
 
         if server_event_id:
             fut = self._pending_rents.pop(str(server_event_id), None)

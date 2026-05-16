@@ -7,7 +7,7 @@ import websockets
 import websockets.server
 
 from ceki_browser import ConnectOptions, connect
-from ceki_browser._exceptions import AuthFailed, ProviderOffline, SessionEnded
+from ceki_browser._exceptions import AuthFailed, CekiError, InsufficientFunds, ProviderOffline, SessionEnded
 
 
 class _CloseImmediately4403:
@@ -97,5 +97,68 @@ async def test_error_message_uses_reason_field(mock_relay) -> None:
         await asyncio.wait_for(rent_task, timeout=5)
     assert exc_info.value.reason == "heartbeat_timeout"
     assert exc_info.value.reason != "None"
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_handle_error_minus_1014_raises_ceki_error(mock_relay) -> None:
+    """error code=-1014 (Insufficient balance) → CekiError raised immediately, not 90s timeout."""
+    url = f"ws://127.0.0.1:{mock_relay.port}"
+    client = await connect("testkey", ConnectOptions(relay_url=url))
+
+    rent_task = asyncio.create_task(client.rent(schedule_id=99))
+    await asyncio.sleep(0.05)
+
+    await mock_relay.send_to_all({
+        "type": "error",
+        "code": -1014,
+        "message": "Insufficient balance",
+    })
+
+    with pytest.raises(CekiError, match="Insufficient balance"):
+        await asyncio.wait_for(rent_task, timeout=2)
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_handle_error_minus_1012_raises_insufficient_funds(mock_relay) -> None:
+    """error code=-1012 → InsufficientFunds raised immediately."""
+    url = f"ws://127.0.0.1:{mock_relay.port}"
+    client = await connect("testkey", ConnectOptions(relay_url=url))
+
+    rent_task = asyncio.create_task(client.rent(schedule_id=88))
+    await asyncio.sleep(0.05)
+
+    await mock_relay.send_to_all({
+        "type": "error",
+        "code": -1012,
+        "message": "Not enough funds",
+    })
+
+    with pytest.raises(InsufficientFunds):
+        await asyncio.wait_for(rent_task, timeout=2)
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_handle_error_unknown_code_raises_ceki_error(mock_relay) -> None:
+    """Unknown error code → CekiError (not plain Exception)."""
+    url = f"ws://127.0.0.1:{mock_relay.port}"
+    client = await connect("testkey", ConnectOptions(relay_url=url))
+
+    rent_task = asyncio.create_task(client.rent(schedule_id=77))
+    await asyncio.sleep(0.05)
+
+    await mock_relay.send_to_all({
+        "type": "error",
+        "code": -9999,
+        "message": "something weird",
+    })
+
+    with pytest.raises(CekiError, match="relay error -9999"):
+        await asyncio.wait_for(rent_task, timeout=2)
 
     await client.close()
