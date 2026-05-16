@@ -362,6 +362,12 @@ class Client:
             if browser:
                 await browser._on_provider_reconnected(msg)
             return
+        if mtype == "user_events":
+            session_id = msg.get("session_id", "")
+            browser = self._active_browsers.get(session_id)
+            if browser:
+                await browser._on_user_events(msg)
+            return
         if mtype == "chat.message":
             session_id = msg.get("session_id", "")
             browser = self._active_browsers.get(session_id)

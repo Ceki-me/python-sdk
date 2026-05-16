@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 TabOpenedCallback = Callable[[str], Awaitable[None]]
 SimpleCallback = Callable[[], Awaitable[None]]
+UserEventCallback = Callable[[list[dict[str, Any]]], Awaitable[None]]
 
 _ERROR_TERMINAL = {-1011, -1012, -1015, -1018}
 
@@ -58,6 +59,7 @@ class Browser:
         self._tab_opened_callbacks: list[TabOpenedCallback] = []
         self._provider_disconnected_callbacks: list[SimpleCallback] = []
         self._provider_reconnected_callbacks: list[SimpleCallback] = []
+        self._user_event_callbacks: list[UserEventCallback] = []
         self._ended = asyncio.Event()
         self._ended_reason: str | None = None
 
@@ -135,6 +137,9 @@ class Browser:
 
     def on_provider_reconnected(self, callback: SimpleCallback) -> None:
         self._provider_reconnected_callbacks.append(callback)
+
+    def on_user_event(self, callback: UserEventCallback) -> None:
+        self._user_event_callbacks.append(callback)
 
     async def switch_tab(self) -> None:
         await self._client._ws_send({"type": "switch_tab", "session_id": self.session_id})
@@ -430,6 +435,11 @@ class Browser:
     async def _on_provider_reconnected(self, msg: dict[str, Any]) -> None:
         for cb in self._provider_reconnected_callbacks:
             asyncio.create_task(cast(Coroutine, cb()))
+
+    async def _on_user_events(self, msg: dict[str, Any]) -> None:
+        events: list[dict[str, Any]] = msg.get("events", [])
+        for cb in self._user_event_callbacks:
+            asyncio.create_task(cast(Coroutine, cb(events)))
 
     async def _on_error(self, msg: dict[str, Any]) -> None:
         code = msg.get("code", 0)
