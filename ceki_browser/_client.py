@@ -145,13 +145,19 @@ class Client:
         self,
         schedule_id: int,
         *,
+        mode: str = "incognito",
         human="natural",
         masking_mode: bool = True,
         fingerprint: bool | dict | None = True,
     ) -> Browser:
+        if mode not in ("incognito", "main"):
+            raise ValueError(f"mode must be 'incognito' or 'main', got {mode!r}")
         fut: asyncio.Future[Match] = asyncio.get_event_loop().create_future()
         self._pending_rent_queue.append(fut)
-        await self._ws_send({"type": "rent", "browser_id": schedule_id})
+        msg: dict = {"type": "rent", "browser_id": schedule_id}
+        if mode != "incognito":
+            msg["mode"] = mode
+        await self._ws_send(msg)
         try:
             match = await asyncio.wait_for(fut, timeout=90)
         except asyncio.TimeoutError:

@@ -64,7 +64,7 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
         fp_data = profile.get("fingerprint") or True
     client = await connect(api_key, _connect_options())
     try:
-        browser = await client.rent(args.schedule, fingerprint=fp_data)
+        browser = await client.rent(args.schedule, mode=args.mode, fingerprint=fp_data)
         save_session(browser.session_id, {
             "session_id": browser.session_id,
             "chat_topic_id": browser.chat_topic_id,
@@ -360,6 +360,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_rent = sub.add_parser("rent", help="Rent a browser")
     p_rent.add_argument("--schedule", type=int, required=True, help="Schedule ID")
+    p_rent.add_argument("--mode", choices=["incognito", "main"], default="incognito", help="Profile mode (default: incognito)")
     p_rent.add_argument("--fingerprint-from", help="Path to profile JSON with fingerprint data")
 
     p_snap = sub.add_parser("snapshot", help="Take screenshot + get new chat messages")
