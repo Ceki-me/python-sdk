@@ -244,6 +244,17 @@ async def _cmd_profile(args: argparse.Namespace) -> None:
             await client.disconnect()
 
 
+async def _cmd_my_browsers(args: argparse.Namespace) -> None:
+    api_key = _get_api_key()
+    client = await connect(api_key, _connect_options())
+    try:
+        results = await client.my_browsers()
+        _out([r.model_dump() for r in results])
+    finally:
+        if client._ws:
+            await client.disconnect()
+
+
 async def _cmd_search(args: argparse.Namespace) -> None:
     api_key = _get_api_key()
     client = await connect(api_key, _connect_options())
@@ -410,6 +421,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_profile_import = profile_sub.add_parser("import", help="Import profile from file")
     p_profile_import.add_argument("-i", "--input", required=True, help="Input JSON path")
 
+    sub.add_parser("my-browsers", help="List browsers with pre-arranged rent contracts")
+
     p_search = sub.add_parser("search", help="Search available browsers")
     p_search.add_argument("--limit", type=int, default=20, help="Max results")
     p_search.add_argument("--filter", action="append", help="Filter key=val (repeatable)")
@@ -463,6 +476,7 @@ def main() -> None:
         "chat": _cmd_chat,
         "stop": _cmd_stop,
         "profile": _cmd_profile,
+        "my-browsers": _cmd_my_browsers,
         "search": _cmd_search,
         "wait": _cmd_wait,
         "screenshot": _cmd_screenshot,

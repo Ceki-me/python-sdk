@@ -18,7 +18,7 @@ from ._exceptions import (
 from ._models import BrowserOption, ChatMessage, Match, ReadReceipt, Snapshot
 from .humanize import HumanProfile
 
-__version__ = "2.5.0"
+__version__ = "2.9.0"
 __all__ = [
     "connect",
     "ConnectOptions",

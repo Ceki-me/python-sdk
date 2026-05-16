@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,6 +21,8 @@ class BrowserOption(BaseModel):
     online: bool = True
     currency: str | None = None
     kal_id: int | None = None
+    profile_mode: Literal['main', 'incognito'] | None = None
+    allowed_domains: list[str] | None = None
 
 
 class Match(BaseModel):

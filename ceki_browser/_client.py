@@ -126,6 +126,20 @@ class Client:
         items = data.get("data", data) if isinstance(data, dict) else data
         return [BrowserOption.model_validate(x) for x in items]
 
+    async def my_browsers(self) -> list[BrowserOption]:
+        url = f"{self.api_url}/api/agent/browsers"
+        headers: dict[str, str] = {"Authorization": f"Bearer {self.api_key}"}
+        if self._basic_auth:
+            import base64
+            creds = base64.b64encode(f"{self._basic_auth[0]}:{self._basic_auth[1]}".encode()).decode()
+            headers["X-Basic-Auth"] = f"Basic {creds}"
+        async with httpx.AsyncClient() as http:
+            resp = await http.get(url, headers=headers)
+            resp.raise_for_status()
+        data = resp.json()
+        items = data.get("browsers", data.get("data", data)) if isinstance(data, dict) else data
+        return [BrowserOption.model_validate(x) for x in items]
+
     async def rent(
         self,
         schedule_id: int,
