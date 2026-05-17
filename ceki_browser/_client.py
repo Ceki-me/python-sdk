@@ -307,6 +307,12 @@ class Client:
                 fut.set_exception(exc_to_raise)
             return
         if mtype == "match":
+            if msg.get("requires_ack"):
+                session_id = msg.get("session_id", "")
+                try:
+                    await self._ws_send({"type": "match_ack", "session_id": session_id})
+                except Exception:
+                    pass
             server_event_id = str(msg.get("event_id", ""))
             fut = self._pending_rents.pop(server_event_id, None)
             if fut and not fut.done():
