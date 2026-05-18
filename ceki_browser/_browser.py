@@ -514,7 +514,6 @@ class Browser:
     async def _create_captcha_event(
         self, acceptance_timeout: float, completion_timeout: float,
     ) -> int:
-        now = datetime.now(timezone.utc)
         body = {
             "parent_id": int(self._match.event_id) if self._match.event_id else None,
             "kal_schedule_id": self._match.schedule_id,
@@ -525,12 +524,8 @@ class Browser:
             "status_id": 100,
             "data": {
                 "action_type": "captcha",
-                "acceptance_deadline_at": (
-                    now + timedelta(seconds=acceptance_timeout)
-                ).isoformat(),
-                "completion_deadline_at": (
-                    now + timedelta(seconds=completion_timeout)
-                ).isoformat(),
+                "acceptance_deadline_at": int(acceptance_timeout),
+                "completion_deadline_at": int(completion_timeout),
             },
         }
         async with httpx.AsyncClient() as http:
