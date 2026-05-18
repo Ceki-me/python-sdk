@@ -245,6 +245,34 @@ async def _cmd_profile(args: argparse.Namespace) -> None:
             await client.disconnect()
 
 
+async def _cmd_sessions(args: argparse.Namespace) -> None:
+    api_key = _get_api_key()
+    client = await connect(api_key, _connect_options())
+    try:
+        active = not getattr(args, "all", False)
+        limit = getattr(args, "limit", 50)
+        results = await client.list_sessions(active=active, limit=limit)
+        if getattr(args, "json", False):
+            _out([r.model_dump() for r in results])
+        else:
+            if not results:
+                print("No sessions found.")
+                return
+            header = f"{'SID':<8}{'SCHEDULE':<10}{'STARTED':<22}{'DURATION':<10}{'EARNED':<9}{'STATUS':<10}{'RENTER':<16}{'PROVIDER'}"
+            print(header)
+            for s in results:
+                started = (s.started_at.strftime("%Y-%m-%dT%H:%M:%SZ") if s.started_at else "—")
+                mins, secs = divmod(s.duration, 60)
+                dur = f"{mins}:{secs:02d}"
+                earned = f"${s.earned:.2f}"
+                renter = s.renter.get("name", "—") if s.renter else "—"
+                provider = s.provider.get("name", "—") if s.provider else "—"
+                print(f"{s.id:<8}{s.schedule_id:<10}{started:<22}{dur:<10}{earned:<9}{s.status:<10}{renter:<16}{provider}")
+    finally:
+        if client._ws:
+            await client.disconnect()
+
+
 async def _cmd_my_browsers(args: argparse.Namespace) -> None:
     api_key = _get_api_key()
     client = await connect(api_key, _connect_options())
@@ -444,6 +472,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_profile_import = profile_sub.add_parser("import", help="Import profile from file")
     p_profile_import.add_argument("-i", "--input", required=True, help="Input JSON path")
 
+    p_sessions = sub.add_parser("sessions", help="List agent sessions (active by default)")
+    p_sessions.add_argument("--all", action="store_true", help="Show all sessions, not just active")
+    p_sessions.add_argument("--limit", type=int, default=50, help="Max results")
+    p_sessions.add_argument("--json", action="store_true", help="Raw JSON output")
+
     sub.add_parser("my-browsers", help="List browsers with pre-arranged rent contracts")
 
     p_search = sub.add_parser("search", help="Search available browsers")
@@ -505,6 +538,7 @@ def main() -> None:
         "chat": _cmd_chat,
         "stop": _cmd_stop,
         "profile": _cmd_profile,
+        "sessions": _cmd_sessions,
         "my-browsers": _cmd_my_browsers,
         "search": _cmd_search,
         "wait": _cmd_wait,

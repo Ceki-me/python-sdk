@@ -18,10 +18,10 @@ from ._exceptions import (
     SessionExpired,
     SessionNotFound,
 )
-from ._models import BrowserOption, ChatMessage, Match, ReadReceipt, Snapshot
+from ._models import BrowserOption, ChatMessage, Match, ReadReceipt, SessionInfo, Snapshot
 from .humanize import HumanProfile
 
-__version__ = "2.14.0"
+__version__ = "2.15.0"
 __all__ = [
     "connect",
     "ConnectOptions",
@@ -41,6 +41,7 @@ __all__ = [
     "SessionNotFound",
     "SessionExpired",
     "NotOwner",
+    "SessionInfo",
     "Snapshot",
     "BrowserProfile",
     "CekiError",

@@ -66,6 +66,22 @@ class ReadReceipt(BaseModel):
     read_at: float = 0.0
 
 
+class SessionInfo(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    schedule_id: int
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    status: str = "active"
+    duration: int = 0
+    earned: float = 0.0
+    price_per_min: float = 0.0
+    renter: dict = {}
+    provider: dict = {}
+    data: dict = {}
+
+
 class Snapshot(BaseModel):
     screenshot: str
     chat: list[ChatMessage] = []
