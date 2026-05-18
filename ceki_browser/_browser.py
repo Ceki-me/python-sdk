@@ -506,7 +506,7 @@ class Browser:
             correction_id=data.get("correction_id"),
             browser=self,
         )
-        if auto_accept and solved and result._correction_id:
+        if auto_accept and solved and result.correction_id:
             await asyncio.sleep(2)
             await result.accept_work()
         return result
@@ -535,7 +535,7 @@ class Browser:
         }
         async with httpx.AsyncClient() as http:
             resp = await http.post(
-                f"{self._client.api_url}/api/kal/event/store",
+                f"{self._client.api_url}/api/agent/kal/event/store",
                 headers={**self._api_headers(), "Content-Type": "application/json"},
                 json=body,
             )
@@ -550,7 +550,7 @@ class Browser:
         try:
             async with httpx.AsyncClient() as http:
                 await http.patch(
-                    f"{self._client.api_url}/api/kal/event/{child_event_id}",
+                    f"{self._client.api_url}/api/agent/kal/event/{child_event_id}",
                     headers={**self._api_headers(), "Content-Type": "application/json"},
                     json={"status_id": 777},
                 )

@@ -346,16 +346,17 @@ async def _cmd_request_captcha(args: argparse.Namespace) -> None:
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
+        auto = not args.manual
         result = await browser.request_captcha(
             acceptance_timeout=args.acceptance,
             completion_timeout=args.completion,
-            auto_accept=True,
+            auto_accept=auto,
         )
         _out(result.to_dict())
         if not result.solved:
             sys.exit(1)
     except CaptchaTimeoutError as e:
-        _out({"solved": False, "cancel_reason": f"timeout:{e.phase}", "child_event_id": None})
+        _out({"solved": False, "cancel_reason": f"timeout:{e.phase}", "child_event_id": None, "correction_id": None})
         sys.exit(1)
     finally:
         if client._ws:
@@ -480,6 +481,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_captcha.add_argument("session_id", help="Session ID")
     p_captcha.add_argument("--acceptance", type=float, default=60, help="Acceptance timeout sec (min 30)")
     p_captcha.add_argument("--completion", type=float, default=120, help="Completion timeout sec (min 30)")
+    p_captcha.add_argument("--manual", action="store_true", help="Disable auto-accept (agent votes manually)")
 
     p_cdp = sub.add_parser("cdp", help="Send raw CDP command")
     p_cdp.add_argument("session_id", help="Session ID")
