@@ -515,30 +515,20 @@ class Browser:
         self, acceptance_timeout: float, completion_timeout: float,
     ) -> int:
         body = {
-            "parent_id": int(self._match.event_id) if self._match.event_id else None,
-            "kal_schedule_id": self._match.schedule_id,
-            "billable_type": "App\\Models\\Agent",
-            "benefitable_type": "App\\Models\\User",
-            "benefitable_id": self._match.provider_user_id,
-            "amount": 0.10,
-            "status_id": 100,
-            "data": {
-                "action_type": "captcha",
-                "acceptance_deadline_at": int(acceptance_timeout),
-                "completion_deadline_at": int(completion_timeout),
-            },
+            "acceptance_deadline_at": int(acceptance_timeout),
+            "completion_deadline_at": int(completion_timeout),
         }
         async with httpx.AsyncClient() as http:
             resp = await http.post(
-                f"{self._client.api_url}/api/agent/kal/event/store",
+                f"{self._client.api_url}/api/agent/sessions/{self._match.event_id}/captcha-request",
                 headers={**self._api_headers(), "Content-Type": "application/json"},
                 json=body,
             )
             resp.raise_for_status()
         result = resp.json()
-        event_id = result.get("id") or (result.get("data") or {}).get("id")
+        event_id = result.get("id")
         if not event_id:
-            raise RuntimeError("event creation did not return an id")
+            raise RuntimeError("captcha request did not return an id")
         return int(event_id)
 
     async def _expire_captcha_event(self, child_event_id: int) -> None:
