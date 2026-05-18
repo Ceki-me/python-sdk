@@ -58,3 +58,13 @@ class SessionExpired(SessionNotFound):
 
 class NotOwner(CekiError):
     pass
+
+
+class CaptchaError(CekiError):
+    pass
+
+
+class CaptchaTimeoutError(CaptchaError):
+    def __init__(self, phase: str):
+        super().__init__(f"captcha timeout: {phase}")
+        self.phase = phase

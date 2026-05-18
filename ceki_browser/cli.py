@@ -11,6 +11,7 @@ from typing import Any
 from . import connect, ConnectOptions
 from ._exceptions import (
     AuthFailed,
+    CaptchaTimeoutError,
     CekiError,
     ConnectionLost,
     SessionNotFound,
@@ -341,6 +342,26 @@ async def _cmd_upload(args: argparse.Namespace) -> None:
             await client.disconnect()
 
 
+async def _cmd_request_captcha(args: argparse.Namespace) -> None:
+    api_key = _get_api_key()
+    client, browser = await _resume_browser(api_key, args.session_id)
+    try:
+        result = await browser.request_captcha(
+            acceptance_timeout=args.acceptance,
+            completion_timeout=args.completion,
+            auto_accept=True,
+        )
+        _out(result.to_dict())
+        if not result.solved:
+            sys.exit(1)
+    except CaptchaTimeoutError as e:
+        _out({"solved": False, "cancel_reason": f"timeout:{e.phase}", "child_event_id": None})
+        sys.exit(1)
+    finally:
+        if client._ws:
+            await client.disconnect()
+
+
 async def _cmd_cdp(args: argparse.Namespace) -> None:
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
@@ -455,6 +476,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_upload.add_argument("--file", required=True, dest="file_path", help="Path to file")
     p_upload.add_argument("--filename", help="Override filename (default: basename)")
 
+    p_captcha = sub.add_parser("request-captcha", help="Request human to solve captcha")
+    p_captcha.add_argument("session_id", help="Session ID")
+    p_captcha.add_argument("--acceptance", type=float, default=60, help="Acceptance timeout sec (min 30)")
+    p_captcha.add_argument("--completion", type=float, default=120, help="Completion timeout sec (min 30)")
+
     p_cdp = sub.add_parser("cdp", help="Send raw CDP command")
     p_cdp.add_argument("session_id", help="Session ID")
     p_cdp.add_argument("--method", required=True, help="CDP method name")
@@ -485,6 +511,7 @@ def main() -> None:
         "configure": _cmd_configure,
         "cdp": _cmd_cdp,
         "upload": _cmd_upload,
+        "request-captcha": _cmd_request_captcha,
     }
 
     handler = handlers.get(args.command)

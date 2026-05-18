@@ -49,6 +49,7 @@ class ChatMessage(BaseModel):
     created_at: str
     edited_at: str | None = None
     deleted_at: str | None = None
+    action: dict | None = None
 
     def is_system(self) -> bool:
         return self.type == 'system'

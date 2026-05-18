@@ -41,6 +41,7 @@ class BrowserChat:
         self._message_callbacks: list[MessageCallback] = []
         self._read_callbacks: list[ReadCallback] = []
         self._pending_sends: dict[str, asyncio.Future[dict]] = {}
+        self._action_queues: dict[int, asyncio.Queue[dict]] = {}
 
     async def send(self, text: str) -> dict:
         if not self._topic_id:
@@ -150,6 +151,13 @@ class BrowserChat:
         if not isinstance(raw, dict):
             log.warning("chat.message without nested 'message': %s", payload)
             return
+        if raw.get("type") == "action" and isinstance(raw.get("action"), dict):
+            action = raw["action"]
+            eid = action.get("event_id")
+            if eid is not None:
+                queue = self._action_queues.get(int(eid))
+                if queue is not None:
+                    await queue.put(action)
         try:
             msg = ChatMessage.model_validate(raw)
         except Exception as exc:

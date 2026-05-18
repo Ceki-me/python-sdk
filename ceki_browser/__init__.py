@@ -1,9 +1,12 @@
 from ._browser import Browser
+from ._captcha import CaptchaResult
 from ._client import Client
 from ._connect import ConnectOptions, connect
 from ._profile import BrowserProfile
 from ._exceptions import (
     AuthFailed,
+    CaptchaError,
+    CaptchaTimeoutError,
     CdpUnrecoverable,
     CekiError,
     ConnectionLost,
@@ -18,7 +21,7 @@ from ._exceptions import (
 from ._models import BrowserOption, ChatMessage, Match, ReadReceipt, Snapshot
 from .humanize import HumanProfile
 
-__version__ = "2.9.0"
+__version__ = "2.13.0"
 __all__ = [
     "connect",
     "ConnectOptions",
@@ -42,4 +45,7 @@ __all__ = [
     "BrowserProfile",
     "CekiError",
     "HumanProfile",
+    "CaptchaResult",
+    "CaptchaError",
+    "CaptchaTimeoutError",
 ]

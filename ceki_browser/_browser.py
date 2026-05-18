@@ -6,14 +6,19 @@ import json
 import logging
 import mimetypes
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Coroutine, Literal, cast
+
+import httpx
 
 from .humanize import HumanProfile, Humanizer
 
 if TYPE_CHECKING:
     from ._client import Client
+from ._captcha import CaptchaResult
 from ._exceptions import (
+    CaptchaTimeoutError,
     CdpUnrecoverable,
     InsufficientFunds,
     ProviderDisconnected,
@@ -387,6 +392,170 @@ class Browser:
         prev = self._humanizer.profile if self._humanizer else None
         self._humanizer = _resolve_human(profile)
         return prev
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Human action / captcha
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _api_headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {"Authorization": f"Bearer {self._client.api_key}"}
+        if self._client._basic_auth:
+            creds = base64.b64encode(
+                f"{self._client._basic_auth[0]}:{self._client._basic_auth[1]}".encode()
+            ).decode()
+            headers["X-Basic-Auth"] = f"Basic {creds}"
+        return headers
+
+    async def request_captcha(
+        self,
+        acceptance_timeout: float = 60,
+        completion_timeout: float = 120,
+        auto_accept: bool = True,
+    ) -> CaptchaResult:
+        if acceptance_timeout < 30:
+            raise ValueError("acceptance_timeout must be >= 30 seconds")
+        if completion_timeout < 30:
+            raise ValueError("completion_timeout must be >= 30 seconds")
+
+        acceptance_timeout = min(acceptance_timeout, 300)
+        completion_timeout = min(completion_timeout, 600)
+
+        child_event_id = await self._create_captcha_event(acceptance_timeout, completion_timeout)
+
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self.chat._action_queues[child_event_id] = queue
+
+        accepted = False
+        completion_deadline = datetime.now(timezone.utc) + timedelta(seconds=completion_timeout)
+
+        try:
+            deadline_accept = asyncio.get_event_loop().time() + acceptance_timeout
+            while True:
+                remaining = deadline_accept - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError()
+                action = await asyncio.wait_for(queue.get(), timeout=remaining)
+                kind = action.get("kind", "")
+                data: dict[str, Any] = action.get("data") or {}
+
+                if kind == "human_action_accepted":
+                    accepted = True
+                    break
+                if kind == "human_action_completed":
+                    return await self._finish_captcha(
+                        child_event_id, data, auto_accept, solved=True,
+                    )
+                if kind in (
+                    "human_action_failed",
+                    "human_action_declined",
+                    "human_action_withdrew",
+                ):
+                    return CaptchaResult(
+                        solved=False,
+                        child_event_id=child_event_id,
+                        cancel_reason=kind.replace("human_action_", ""),
+                        browser=self,
+                    )
+
+            remaining_completion = (
+                completion_deadline - datetime.now(timezone.utc)
+            ).total_seconds()
+            while True:
+                if remaining_completion <= 0:
+                    raise asyncio.TimeoutError()
+                action = await asyncio.wait_for(
+                    queue.get(), timeout=remaining_completion,
+                )
+                kind = action.get("kind", "")
+                data = action.get("data") or {}
+
+                if kind == "human_action_completed":
+                    return await self._finish_captcha(
+                        child_event_id, data, auto_accept, solved=True,
+                    )
+                if kind in ("human_action_failed", "human_action_withdrew"):
+                    return CaptchaResult(
+                        solved=False,
+                        child_event_id=child_event_id,
+                        cancel_reason=kind.replace("human_action_", ""),
+                        browser=self,
+                    )
+                remaining_completion = (
+                    completion_deadline - datetime.now(timezone.utc)
+                ).total_seconds()
+
+        except asyncio.TimeoutError:
+            phase = "completion" if accepted else "acceptance"
+            await self._expire_captcha_event(child_event_id)
+            raise CaptchaTimeoutError(phase) from None
+        finally:
+            self.chat._action_queues.pop(child_event_id, None)
+
+    async def _finish_captcha(
+        self,
+        child_event_id: int,
+        data: dict[str, Any],
+        auto_accept: bool,
+        *,
+        solved: bool,
+    ) -> CaptchaResult:
+        result = CaptchaResult(
+            solved=solved,
+            child_event_id=child_event_id,
+            proof_message_id=data.get("proof_message_id"),
+            correction_id=data.get("correction_id"),
+            browser=self,
+        )
+        if auto_accept and solved and result._correction_id:
+            await asyncio.sleep(2)
+            await result.accept_work()
+        return result
+
+    async def _create_captcha_event(
+        self, acceptance_timeout: float, completion_timeout: float,
+    ) -> int:
+        now = datetime.now(timezone.utc)
+        body = {
+            "parent_id": int(self._match.event_id) if self._match.event_id else None,
+            "kal_schedule_id": self._match.schedule_id,
+            "billable_type": "App\\Models\\Agent",
+            "benefitable_type": "App\\Models\\User",
+            "benefitable_id": self._match.provider_user_id,
+            "amount": 0.10,
+            "status_id": 100,
+            "data": {
+                "action_type": "captcha",
+                "acceptance_deadline_at": (
+                    now + timedelta(seconds=acceptance_timeout)
+                ).isoformat(),
+                "completion_deadline_at": (
+                    now + timedelta(seconds=completion_timeout)
+                ).isoformat(),
+            },
+        }
+        async with httpx.AsyncClient() as http:
+            resp = await http.post(
+                f"{self._client.api_url}/api/kal/event/store",
+                headers={**self._api_headers(), "Content-Type": "application/json"},
+                json=body,
+            )
+            resp.raise_for_status()
+        result = resp.json()
+        event_id = result.get("id") or (result.get("data") or {}).get("id")
+        if not event_id:
+            raise RuntimeError("event creation did not return an id")
+        return int(event_id)
+
+    async def _expire_captcha_event(self, child_event_id: int) -> None:
+        try:
+            async with httpx.AsyncClient() as http:
+                await http.patch(
+                    f"{self._client.api_url}/api/kal/event/{child_event_id}",
+                    headers={**self._api_headers(), "Content-Type": "application/json"},
+                    json={"status_id": 777},
+                )
+        except Exception as exc:
+            log.warning("expire captcha event %d failed: %s", child_event_id, exc)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Internal dispatch (called from Client._reader_loop)
