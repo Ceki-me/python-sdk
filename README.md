@@ -180,130 +180,108 @@ browser.set_human(None)               # Disable mid-session
 - `CEKI_HUMAN_PROFILE_PATH` — Path to custom JSON profile file
 - `CEKI_HUMAN_DISABLE=1` — Disable humanization entirely
 
-## Using from shell / AI agents
+## CLI
 
-The `ceki-browser` CLI lets AI agents (Claude Code, etc.) control a rented browser from plain shell commands. Each command is a short-lived process — the session persists on the server between calls.
+Both SDKs install a single `ceki-browser` binary on your PATH. Same command set whether you came from Python or Node.js.
 
+### Install
+
+Python:
 ```bash
 pip install ceki-browser
-export CEKI_API_KEY=your_key
 ```
 
-### Example 1: Rent + signup flow
-
+Node.js:
 ```bash
-# Rent a browser
-SESSION=$(ceki-browser rent --schedule 42 | jq -r .session_id)
-
-# Navigate and interact
-ceki-browser navigate $SESSION "https://example.com/signup"
-ceki-browser snapshot $SESSION -o /tmp/page.png
-# (AI reads screenshot, decides where to click)
-ceki-browser click $SESSION 350 420
-ceki-browser type $SESSION "user@example.com"
-ceki-browser click $SESSION 350 480
-ceki-browser type $SESSION "securepassword123"
-ceki-browser click $SESSION 400 550
-ceki-browser snapshot $SESSION -o /tmp/after.png
-
-# Done
-ceki-browser stop $SESSION
+npm install -g ceki-browser
 ```
 
-### Example 2: Captcha handoff to provider
+### Environment variables
 
-```bash
-ceki-browser chat $SESSION send "Please solve the captcha on screen"
-# Wait up to 5 minutes for provider response
-REPLY=$(ceki-browser chat $SESSION next --timeout=300)
-# $REPLY is JSON: {"from": 123, "text": "done", "ts": "..."} or null on timeout
-```
-
-### Example 3: Multi-step with snapshot control
-
-```bash
-for step in navigate click type; do
-  # ... perform action ...
-  SNAP=$(ceki-browser snapshot $SESSION -o /tmp/step.png)
-  CHAT=$(echo "$SNAP" | jq -r '.chat')
-  # AI reads /tmp/step.png and $CHAT, decides next action
-done
-```
-
-### Example 4: Profile export/import across sessions
-
-```bash
-# First session: login and export profile
-SESSION=$(ceki-browser rent --schedule 42 | jq -r .session_id)
-ceki-browser navigate $SESSION "https://reddit.com/login"
-# ... perform login ...
-ceki-browser profile $SESSION export -o /tmp/reddit_profile.json --domains ".reddit.com,reddit.com"
-ceki-browser stop $SESSION
-
-# Next session: restore profile
-SESSION=$(ceki-browser rent --schedule 42 | jq -r .session_id)
-ceki-browser profile $SESSION import -i /tmp/reddit_profile.json
-ceki-browser navigate $SESSION "https://reddit.com"
-# Already logged in
-```
-
-### Example 5: Search for browsers and send raw CDP
-
-```bash
-# Find browsers in US region
-ceki-browser search --limit 5 --filter region=US
-
-# Send raw CDP command
-ceki-browser cdp $SESSION --method Page.navigate --params '{"url":"https://example.com"}'
-```
-
-### Example 6: Screenshot and wait
-
-```bash
-# Save screenshot as PNG
-ceki-browser screenshot $SESSION -o /tmp/page.png
-
-# Wait for session to end (blocks until provider ends or timeout)
-RESULT=$(ceki-browser wait $SESSION)
-echo $RESULT  # {"ended": true, "reason": "..."}
-```
-
-### Subcommands
-
-| Command | Description | Exit |
+| Variable | Required | Purpose |
 |---|---|---|
-| `rent --schedule N` | Rent browser, print session JSON | 0 |
-| `snapshot <sid> -o PATH` | Screenshot + new chat messages | 0 |
-| `navigate <sid> <url>` | Navigate to URL | 0 |
-| `click <sid> <x> <y>` | Click at coordinates | 0 |
-| `type <sid> "<text>"` | Type text (add `--natural` for human-like) | 0 |
-| `scroll <sid> <x> <y> <dy>` | Scroll at position | 0 |
-| `chat <sid> send "<text>"` | Send chat message | 0 |
-| `chat <sid> next [--timeout=60]` | Wait for next message (null on timeout) | 0 |
-| `chat <sid> history [--since TS] [--limit N]` | Get chat history (no side effects) | 0 |
-| `chat <sid> send-image --image PATH [--text "..."]` | Send image (optionally with text) | 0 |
-| `stop <sid>` | End session | 0 |
-| `profile <sid> export -o FILE [--domains D] [--no-session-storage]` | Export cookies + storage to JSON | 0 |
-| `profile <sid> import -i FILE` | Import cookies + storage from JSON | 0 |
-| `search [--limit N] [--filter key=val]...` | Search available browsers | 0 |
-| `wait <sid>` | Block until session ends | 0 |
-| `screenshot <sid> -o FILE [--format png\|jpeg]` | Save screenshot to file | 0 |
-| `switch-tab <sid>` | Switch browser tab | 0 |
-| `configure <sid> [--masking-mode V] [--fingerprint V]` | Configure session settings | 0 |
-| `cdp <sid> --method M [--params JSON]` | Send raw CDP command | 0 |
+| `CEKI_API_KEY` | yes | Agent token (`ag_...`) |
+| `CEKI_API_URL` | no | Override API base URL (default: `https://api.ceki.me`) |
+| `CEKI_RELAY_URL` | no | Override relay WS URL (default: `wss://browser.ceki.me/ws/agent`) |
+| `CEKI_CHAT_URL` | no | Override chat-service URL |
+| `CEKI_BASIC_AUTH_USER` / `_PASS` | no | HTTP Basic Auth for protected dev/stage endpoints |
+
+### Quick start
+
+```bash
+export CEKI_API_KEY=ag_...
+
+SCHEDULE=$(ceki-browser search --limit 1 | jq -r '.[0].schedule_id')
+SID=$(ceki-browser rent --schedule $SCHEDULE | jq -r .session_id)
+ceki-browser navigate $SID https://example.com
+ceki-browser snapshot $SID -o snap.png
+ceki-browser stop $SID
+```
+
+The CLI persists session state locally — after `rent` it saves the session ID so subsequent commands resume it by SID without re-renting.
+
+### Commands
+
+#### Discovery and lifecycle
+
+| Command | Description |
+|---|---|
+| `search [--limit N] [--filter K=V]…` | List available browsers |
+| `my-browsers` | List browsers with pre-arranged rent contracts |
+| `rent --schedule ID [--mode incognito\|main] [--fingerprint-from FILE]` | Rent a browser |
+| `sessions [--all] [--limit N] [--json]` | List your sessions |
+| `stop SID` | End a session |
+| `wait SID` | Block until the session ends |
+
+#### Browser control
+
+| Command | Description |
+|---|---|
+| `navigate SID URL` | Open URL |
+| `click SID X Y` | Click at viewport coordinates |
+| `type SID TEXT [--natural]` | Type text into focused element |
+| `scroll SID X Y DY` | Scroll from (X, Y) by `DY` pixels |
+| `screenshot SID -o FILE [--format png\|jpeg] [--full]` | Save screenshot |
+| `snapshot SID -o FILE` | Screenshot + new chat messages |
+| `switch-tab SID` | Switch active tab |
+| `upload SID --selector CSS --file PATH [--filename NAME]` | Attach file to `<input type="file">` |
+
+#### Chat with host
+
+| Command | Description |
+|---|---|
+| `chat SID send TEXT` | Send message to host |
+| `chat SID next [--timeout SEC]` | Wait for next host message |
+| `chat SID history [--since TS] [--limit N]` | Fetch chat history |
+| `chat SID send-image --image PATH [--text MSG]` | Send image to host |
+
+#### Advanced
+
+| Command | Description |
+|---|---|
+| `profile SID export -o FILE [--domains CSV] [--no-session-storage]` | Export cookies / localStorage |
+| `profile SID import -i FILE` | Import previously exported profile |
+| `request-captcha SID [--acceptance SEC] [--completion SEC] [--manual]` | Ask host to solve CAPTCHA |
+| `configure SID [--masking-mode VAL] [--fingerprint VAL]` | Toggle masking / fingerprint |
+| `cdp SID --method METHOD [--params JSON]` | Raw CDP command |
+
+### Output and errors
+
+Successful commands write a single JSON line to stdout. Errors go to stderr as `{"error": "...", "code": "..."}`. Pipe stdout through `jq` to chain commands.
 
 ### Exit codes
 
 | Code | Meaning |
 |---|---|
-| 0 | Success |
-| 1 | Generic error |
-| 2 | Auth error (missing `CEKI_API_KEY`) |
-| 3 | Session not found / expired / not owner |
-| 4 | Timeout |
-| 5 | Network / WebSocket error |
+| `0` | success |
+| `1` | generic error |
+| `2` | `CEKI_API_KEY` not set |
+| `3` | session not found or not owner |
+| `4` | timeout |
+| `5` | network / connection error |
+| `130` | interrupted (Ctrl-C) |
 
-All output is JSON on stdout. Errors go to stderr as `{"error":"...","code":"..."}`.
+Full reference (with EN+RU): https://browser.ceki.me/docs#cli
 
 ## Development
 
