@@ -165,6 +165,10 @@ class Browser:
             )
             await asyncio.wait_for(self._ended.wait(), timeout=timeout)
         except asyncio.TimeoutError:
+            for fut in self._pending_cdp.values():
+                if not fut.done():
+                    fut.cancel()
+            self._pending_cdp.clear()
             self._ended.set()
             self._ended_reason = "user_stop"
         finally:
