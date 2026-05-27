@@ -26,19 +26,6 @@ async def main():
 asyncio.run(main())
 ```
 
-Dev / staging with basic-auth:
-
-```python
-client = await connect(
-    os.environ["CEKI_API_KEY"],
-    ConnectOptions(
-        api_url="https://clawapi.ittribe.org",
-        relay_url="wss://browser.ittribe.org/ws/agent",
-        basic_auth=("admin", "clawdev"),
-    ),
-)
-```
-
 **BREAKING in 2.2.0:** `connect()` no longer accepts `relay_url=` or `reconnect=` kwargs — pass a `ConnectOptions` object instead.
 
 ## Environment Variables
