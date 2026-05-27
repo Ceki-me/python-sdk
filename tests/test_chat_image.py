@@ -5,8 +5,8 @@ import base64
 
 import pytest
 
-from ceki_browser import ConnectOptions, connect
-from ceki_browser._chat import MAX_IMAGE_BYTES
+from ceki_sdk import ConnectOptions, connect
+from ceki_sdk._chat import MAX_IMAGE_BYTES
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
 JPEG_MAGIC = b"\xff\xd8\xff\xe0" + b"\x00" * 100

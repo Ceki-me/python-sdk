@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
-from ceki_browser import ConnectOptions, connect
-from ceki_browser._exceptions import (
+from ceki_sdk import ConnectOptions, connect
+from ceki_sdk._exceptions import (
     CdpUnrecoverable,
     InsufficientFunds,
     RateLimitExceeded,

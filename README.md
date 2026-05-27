@@ -1,11 +1,11 @@
-# ceki-browser
+# ceki-sdk
 
-Python SDK for [ceki.me](https://ceki.me) — rent real browsers from real people for AI agent automation.
+Python SDK for [browser.ceki.me](https://browser.ceki.me) — rent real browsers from real people for AI agent automation.
 
 ## Install
 
 ```bash
-pip install ceki-browser
+pip install ceki-sdk
 ```
 
 ## Quickstart
@@ -13,7 +13,7 @@ pip install ceki-browser
 ```python
 import asyncio
 import os
-from ceki_browser import connect, ConnectOptions
+from ceki_sdk import connect, ConnectOptions
 
 async def main():
     client = await connect(os.environ["CEKI_API_KEY"])
@@ -33,8 +33,6 @@ asyncio.run(main())
 | Variable | Description |
 |---|---|
 | `CEKI_API_KEY` | Your API key (required) |
-| `CEKI_API_URL` | Override REST API base URL |
-| `CEKI_RELAY_URL` | Override relay WebSocket URL |
 
 ## API
 
@@ -46,9 +44,6 @@ Establish a WebSocket connection to the relay. Returns a `Client` instance.
 
 | Field | Default | Description |
 |---|---|---|
-| `api_url` | `https://api.ceki.me` | REST API base URL |
-| `relay_url` | `wss://browser.ceki.me/ws/agent` | Relay WebSocket URL |
-| `basic_auth` | `None` | `(user, password)` for nginx htpasswd |
 | `reconnect` | `True` | Auto-reconnect on disconnect |
 
 ### `client.search(filters=None, limit=20) -> list[BrowserOption]`
@@ -169,18 +164,12 @@ browser.set_human(None)               # Disable mid-session
 
 ## CLI
 
-Both SDKs install a single `ceki-browser` binary on your PATH. Same command set whether you came from Python or Node.js.
+The SDK installs a `ceki` CLI binary on your PATH.
 
 ### Install
 
-Python:
 ```bash
-pip install ceki-browser
-```
-
-Node.js:
-```bash
-npm install -g ceki-browser
+pip install ceki-sdk
 ```
 
 ### Environment variables
@@ -188,21 +177,17 @@ npm install -g ceki-browser
 | Variable | Required | Purpose |
 |---|---|---|
 | `CEKI_API_KEY` | yes | Agent token (`ag_...`) |
-| `CEKI_API_URL` | no | Override API base URL (default: `https://api.ceki.me`) |
-| `CEKI_RELAY_URL` | no | Override relay WS URL (default: `wss://browser.ceki.me/ws/agent`) |
-| `CEKI_CHAT_URL` | no | Override chat-service URL |
-| `CEKI_BASIC_AUTH_USER` / `_PASS` | no | HTTP Basic Auth for protected dev/stage endpoints |
 
 ### Quick start
 
 ```bash
 export CEKI_API_KEY=ag_...
 
-SCHEDULE=$(ceki-browser search --limit 1 | jq -r '.[0].schedule_id')
-SID=$(ceki-browser rent --schedule $SCHEDULE | jq -r .session_id)
-ceki-browser navigate $SID https://example.com
-ceki-browser snapshot $SID -o snap.png
-ceki-browser stop $SID
+SCHEDULE=$(ceki search --limit 1 | jq -r '.[0].schedule_id')
+SID=$(ceki rent --schedule $SCHEDULE | jq -r .session_id)
+ceki navigate $SID https://example.com
+ceki snapshot $SID -o snap.png
+ceki stop $SID
 ```
 
 The CLI persists session state locally — after `rent` it saves the session ID so subsequent commands resume it by SID without re-renting.
@@ -275,6 +260,6 @@ Full reference (with EN+RU): https://browser.ceki.me/docs#cli
 ```bash
 pip install -e ".[dev]"
 pytest
-ruff check ceki_browser/
-mypy ceki_browser/
+ruff check ceki_sdk/
+mypy ceki_sdk/
 ```

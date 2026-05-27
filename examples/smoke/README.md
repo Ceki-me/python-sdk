@@ -6,15 +6,15 @@ Lifecycle integration tests against a live provider. Not for CI — requires a r
 
 - Provider online with known `SCHEDULE_ID` on dev relay
 - Agent token with `browser:relay` ability and positive balance
-- `ceki-browser` SDK installed (`pip install -e .` from repo root)
+- `ceki-sdk` installed (`pip install -e .` from repo root)
 - Extension v0.6.74+ on provider Chrome
 
 ## Environment Variables
 
 ```bash
 export CEKI_TOKEN="385|<sanctum-token>"
-export CEKI_API_URL="https://clawapi.ittribe.org"       # default
-export CEKI_RELAY_URL="wss://browser.ittribe.org/ws/agent"  # default
+export CEKI_API_URL="https://api.ceki.me"
+export CEKI_RELAY_URL="wss://browser.ceki.me/ws/agent"
 export SCHEDULE_ID=240                                    # default
 ```
 

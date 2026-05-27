@@ -11,8 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ceki_browser._state import save_session, load_session, delete_session, get_last_seen_ts, update_last_seen_ts
-from ceki_browser.cli import build_parser
+from ceki_sdk._state import save_session, load_session, delete_session, get_last_seen_ts, update_last_seen_ts
+from ceki_sdk.cli import build_parser
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -21,7 +21,7 @@ from ceki_browser.cli import build_parser
 
 
 def test_state_save_load_delete(tmp_path: Path):
-    with patch("ceki_browser._state._STATE_DIR", tmp_path / "sessions"):
+    with patch("ceki_sdk._state._STATE_DIR", tmp_path / "sessions"):
         save_session("test-1", {"session_id": "test-1", "schedule_id": 5})
         data = load_session("test-1")
         assert data is not None
@@ -33,7 +33,7 @@ def test_state_save_load_delete(tmp_path: Path):
 
 
 def test_state_last_seen_ts(tmp_path: Path):
-    with patch("ceki_browser._state._STATE_DIR", tmp_path / "sessions"):
+    with patch("ceki_sdk._state._STATE_DIR", tmp_path / "sessions"):
         assert get_last_seen_ts("s1") is None
         save_session("s1", {"session_id": "s1"})
         assert get_last_seen_ts("s1") is None
@@ -277,7 +277,7 @@ def test_search_domains_parsing():
 
 def test_cli_uses_disconnect_not_close():
     """CLI must use client.disconnect(), not client.close(), to avoid killing active sessions."""
-    cli_path = Path(__file__).resolve().parent.parent / "ceki_browser" / "cli.py"
+    cli_path = Path(__file__).resolve().parent.parent / "ceki_sdk" / "cli.py"
     src = cli_path.read_text()
     assert "client.disconnect()" in src
     assert "client.close()" not in src
@@ -304,7 +304,7 @@ def test_search_filter_parsing():
 def test_missing_api_key_exits_2():
     env = {k: v for k, v in __import__("os").environ.items() if k != "CEKI_API_KEY"}
     result = subprocess.run(
-        [sys.executable, "-m", "ceki_browser.cli", "rent", "--schedule", "1"],
+        [sys.executable, "-m", "ceki_sdk.cli", "rent", "--schedule", "1"],
         capture_output=True,
         text=True,
         env=env,
@@ -320,8 +320,8 @@ def test_missing_api_key_exits_2():
 
 
 async def test_resume_not_found():
-    from ceki_browser._client import Client
-    from ceki_browser._exceptions import SessionNotFound
+    from ceki_sdk._client import Client
+    from ceki_sdk._exceptions import SessionNotFound
 
     client = Client(
         api_key="test",
@@ -346,8 +346,8 @@ async def test_resume_not_found():
 
 
 async def test_resume_not_owner():
-    from ceki_browser._client import Client
-    from ceki_browser._exceptions import NotOwner
+    from ceki_sdk._client import Client
+    from ceki_sdk._exceptions import NotOwner
 
     client = Client(
         api_key="test",
@@ -372,7 +372,7 @@ async def test_resume_not_owner():
 
 
 async def test_resume_ok():
-    from ceki_browser._client import Client
+    from ceki_sdk._client import Client
 
     client = Client(
         api_key="test",
@@ -408,7 +408,7 @@ async def test_resume_ok():
 
 
 async def test_snapshot_returns_data():
-    from ceki_browser import Browser
+    from ceki_sdk import Browser
     import base64
 
     client = AsyncMock()

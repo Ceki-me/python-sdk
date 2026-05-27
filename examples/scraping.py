@@ -1,7 +1,7 @@
 """Scraping example — query multiple elements."""
 import asyncio
 
-from ceki_browser import Browser
+from ceki_sdk import Browser
 
 
 async def main():

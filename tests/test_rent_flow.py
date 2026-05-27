@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
-from ceki_browser import Client, ConnectOptions, connect
-from ceki_browser._exceptions import (
+from ceki_sdk import Client, ConnectOptions, connect
+from ceki_sdk._exceptions import (
     ProviderOffline,
     RateLimitExceeded,
     SessionEnded,

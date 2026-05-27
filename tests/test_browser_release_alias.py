@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ceki_browser import Browser
+from ceki_sdk import Browser
 
 
 @pytest.fixture

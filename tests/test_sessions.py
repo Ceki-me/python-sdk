@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from ceki_browser import Client, ConnectOptions, SessionInfo, connect
+from ceki_sdk import Client, ConnectOptions, SessionInfo, connect
 
 from .conftest import MockRelayServer
 

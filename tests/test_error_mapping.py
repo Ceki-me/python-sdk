@@ -6,8 +6,8 @@ import pytest
 import websockets
 import websockets.server
 
-from ceki_browser import ConnectOptions, connect
-from ceki_browser._exceptions import AuthFailed, CekiError, InsufficientFunds, ProviderOffline, SessionEnded
+from ceki_sdk import ConnectOptions, connect
+from ceki_sdk._exceptions import AuthFailed, CekiError, InsufficientFunds, ProviderOffline, SessionEnded
 
 
 class _CloseImmediately4403:

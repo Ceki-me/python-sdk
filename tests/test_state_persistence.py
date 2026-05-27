@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ceki_browser import Browser
-from ceki_browser._state import save_session, load_session, get_last_seen_ts, update_last_seen_ts
+from ceki_sdk import Browser
+from ceki_sdk._state import save_session, load_session, get_last_seen_ts, update_last_seen_ts
 
 
 def _make_browser():
@@ -29,7 +29,7 @@ def _make_browser():
 
 
 def _make_chat_msg(msg_id: str, text: str, ts: str):
-    from ceki_browser._models import ChatMessage
+    from ceki_sdk._models import ChatMessage
     return ChatMessage(
         _id=msg_id,
         topic_id="t1",
@@ -43,7 +43,7 @@ def _make_chat_msg(msg_id: str, text: str, ts: str):
 async def test_snapshot_filters_old_messages_client_side(tmp_path: Path):
     """Two sequential snapshots: second one returns no old messages even if
     chat.history returns them (simulating server ignoring 'since' param)."""
-    with patch("ceki_browser._state._STATE_DIR", tmp_path / "sessions"):
+    with patch("ceki_sdk._state._STATE_DIR", tmp_path / "sessions"):
         sid = "persist-1"
         save_session(sid, {"session_id": sid, "schedule_id": 1, "last_seen_ts": None})
 
@@ -98,7 +98,7 @@ async def test_snapshot_filters_old_messages_client_side(tmp_path: Path):
 
 async def test_snapshot_no_last_seen_returns_all(tmp_path: Path):
     """First ever snapshot (no last_seen_ts) returns all messages."""
-    with patch("ceki_browser._state._STATE_DIR", tmp_path / "sessions"):
+    with patch("ceki_sdk._state._STATE_DIR", tmp_path / "sessions"):
         msg1 = _make_chat_msg("m1", "hi", "2026-01-01T00:00:01Z")
         png_data = base64.b64encode(b"\x89PNG").decode()
 

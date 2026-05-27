@@ -24,7 +24,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _opts():
-    from ceki_browser import ConnectOptions
+    from ceki_sdk import ConnectOptions
     return ConnectOptions(
         relay_url=os.environ.get("CEKI_RELAY_URL", "wss://browser.ittribe.org/ws/agent"),
         api_url=os.environ.get("CEKI_API_URL", "https://clawapi.ittribe.org"),
@@ -50,7 +50,7 @@ async def _eval_int(browser, expr: str) -> int:
 
 
 async def _discover_schedule():
-    from ceki_browser import connect
+    from ceki_sdk import connect
     api_key = os.environ["CEKI_API_KEY"]
     client = await connect(api_key, _opts())
     try:
@@ -111,7 +111,7 @@ async def _collect_browser_fingerprint(browser):
 
 @pytest.mark.asyncio
 async def test_fingerprint_persists_across_rents():
-    from ceki_browser import connect
+    from ceki_sdk import connect
 
     api_key = os.environ["CEKI_API_KEY"]
     schedule_id = await _discover_schedule()

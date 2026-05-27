@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ceki_browser._browser import Browser
-from ceki_browser.cli import build_parser
+from ceki_sdk._browser import Browser
+from ceki_sdk.cli import build_parser
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -268,7 +268,7 @@ def test_cli_upload_missing_file():
     env = {**__import__("os").environ, "CEKI_API_KEY": "test-key"}
     result = subprocess.run(
         [
-            sys.executable, "-m", "ceki_browser.cli",
+            sys.executable, "-m", "ceki_sdk.cli",
             "upload", "ses-1",
             "--selector", "input[type=file]",
             "--file", "/nonexistent/path/file.txt",

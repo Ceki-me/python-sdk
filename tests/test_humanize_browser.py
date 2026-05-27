@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
-from ceki_browser._browser import Browser, _resolve_human
-from ceki_browser.humanize import HumanProfile, Humanizer
+from ceki_sdk._browser import Browser, _resolve_human
+from ceki_sdk.humanize import HumanProfile, Humanizer
 
 
 def _make_browser(human="natural"):

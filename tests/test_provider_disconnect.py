@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from ceki_browser import ConnectOptions, ProviderDisconnected, SessionEnded, connect
+from ceki_sdk import ConnectOptions, ProviderDisconnected, SessionEnded, connect
 
 
 async def _make_browser(mock_relay, session_id: str = "sess-pd"):

@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
-from ceki_browser import ConnectOptions, connect
-from ceki_browser._models import ChatMessage, ReadReceipt
+from ceki_sdk import ConnectOptions, connect
+from ceki_sdk._models import ChatMessage, ReadReceipt
 
 
 @pytest.fixture
@@ -225,7 +225,7 @@ def test_chatmessage_extra_fields_ignored():
 
 
 def test_match_provider_user_id():
-    from ceki_browser._models import Match
+    from ceki_sdk._models import Match
     m = Match.model_validate({
         "session_id": "sess-1",
         "schedule_id": 240,
@@ -238,7 +238,7 @@ def test_match_provider_user_id():
 
 
 def test_match_provider_user_id_missing():
-    from ceki_browser._models import Match
+    from ceki_sdk._models import Match
     m = Match.model_validate({
         "session_id": "sess-2",
         "schedule_id": 240,

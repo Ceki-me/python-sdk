@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from ceki_browser import Client, ConnectOptions, connect
-from ceki_browser._captcha import CaptchaResult
-from ceki_browser._exceptions import CaptchaError, CaptchaTimeoutError
+from ceki_sdk import Client, ConnectOptions, connect
+from ceki_sdk._captcha import CaptchaResult
+from ceki_sdk._exceptions import CaptchaError, CaptchaTimeoutError
 
 from .conftest import MockRelayServer
 

@@ -4,17 +4,17 @@
 
 ## Pre-requisites
 
-1. Provider онлайн с известным `SCHEDULE_ID` на dev relay (`wss://relay.ittribe.org/ws/agent`)
+1. Provider онлайн с известным `SCHEDULE_ID` на relay (`wss://browser.ceki.me/ws/agent`)
 2. Agent токен с ability `browser:relay` от dev backend
 3. IMAP-доступ к `kom@ceki.me` (plus-addressing)
-4. Chrome с установленным расширением `ceki-browser-extension` (dev build) на стороне провайдера
+4. Chrome с установленным расширением Ceki на стороне провайдера
 5. Provider положительный баланс (`agent:deposit` сделан)
 
 ## Env
 
 ```
 export CEKI_API_KEY=1|<sanctum-token>
-export CEKI_RELAY_URL=wss://relay.ittribe.org/ws/agent
+export CEKI_RELAY_URL=wss://browser.ceki.me/ws/agent
 export CEKI_ENV=dev
 export SCHEDULE_ID=42
 export IMAP_HOST=mail.ceki.me

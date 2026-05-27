@@ -1,7 +1,7 @@
 import asyncio
 import os
 
-from ceki_browser import connect
+from ceki_sdk import connect
 
 
 async def main() -> None:

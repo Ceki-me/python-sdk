@@ -1,5 +1,5 @@
 """
-GitHub signup via ceki-browser SDK.
+GitHub signup via ceki-sdk SDK.
 
 Run:
   CEKI_API_KEY=... \\
@@ -19,8 +19,8 @@ import os
 import secrets
 import string
 
-from ceki_browser import connect
-from ceki_browser._connect import ConnectOptions
+from ceki_sdk import connect
+from ceki_sdk._connect import ConnectOptions
 
 from .imap_helper import wait_for_confirm_link
 

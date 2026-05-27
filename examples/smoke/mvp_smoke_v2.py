@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Integration smoke tests for ceki-browser SDK 2.2.0+.
+"""Integration smoke tests for ceki-sdk SDK 2.2.0+.
 
 Scenarios A–K exercising the full lifecycle through the public API.
 
@@ -28,7 +28,7 @@ from typing import Any
 # Ensure the SDK is importable when running from repo root
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from ceki_browser import (
+from ceki_sdk import (
     CekiError,
     Client,
     ConnectOptions,
@@ -37,7 +37,7 @@ from ceki_browser import (
     SessionEnded,
     connect,
 )
-from ceki_browser._exceptions import ProviderOffline
+from ceki_sdk._exceptions import ProviderOffline
 
 # ── Config ──────────────────────────────────────────────────────────────────
 

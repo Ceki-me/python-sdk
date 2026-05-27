@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from ceki_browser import ConnectOptions, connect
+from ceki_sdk import ConnectOptions, connect
 
 from .conftest import MockRelayServer
 

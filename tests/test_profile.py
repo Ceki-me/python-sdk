@@ -5,7 +5,7 @@ import json
 import pytest
 from unittest.mock import AsyncMock
 
-from ceki_browser._profile import BrowserProfile
+from ceki_sdk._profile import BrowserProfile
 
 
 SAMPLE_FINGERPRINT = {
@@ -267,11 +267,11 @@ async def test_fingerprint_json_roundtrip():
 @pytest.mark.asyncio
 async def test_profile_accessible_on_browser(mock_relay):
     """Browser.profile is available after connect (no rent needed — just check attribute)."""
-    from ceki_browser import ConnectOptions, connect
+    from ceki_sdk import ConnectOptions, connect
     client = await connect("test-key", ConnectOptions(relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent"))
     try:
         assert hasattr(client, "_active_browsers")
-        from ceki_browser import BrowserProfile
+        from ceki_sdk import BrowserProfile
         assert BrowserProfile is not None
     finally:
         await client.close()

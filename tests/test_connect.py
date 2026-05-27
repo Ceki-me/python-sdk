@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ceki_browser import Client, ConnectOptions, connect
+from ceki_sdk import Client, ConnectOptions, connect
 
 from .conftest import MockRelayServer
 

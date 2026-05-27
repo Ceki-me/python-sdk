@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from ceki_browser import ConnectOptions, connect
-from ceki_browser._models import ChatMessage
+from ceki_sdk import ConnectOptions, connect
+from ceki_sdk._models import ChatMessage
 
 
 def _make_response(data) -> httpx.Response:

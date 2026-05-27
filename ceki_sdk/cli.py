@@ -404,7 +404,7 @@ async def _cmd_cdp(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="ceki-browser", description="CLI for ceki.me browser rental")
+    parser = argparse.ArgumentParser(prog="ceki", description="CLI for browser.ceki.me rental")
 
     sub = parser.add_subparsers(dest="command", required=True)
 
