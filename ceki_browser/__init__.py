@@ -1,58 +1,52 @@
-from .chat_direct import ChatClient
-from .client import Browser
-from .humanize import HumanProfile, Humanizer
-from .errors import (
-    AuthError,
-    CekiBrowserError,
-    CommandTimeout,
-    HumanActionDeclined,
-    HumanActionTimeout,
-    NavigationTimeout,
-    NoMatchError,
+from ._browser import Browser
+from ._captcha import CaptchaResult
+from ._client import Client
+from ._connect import ConnectOptions, connect
+from ._profile import BrowserProfile
+from ._exceptions import (
+    AuthFailed,
+    CaptchaError,
+    CaptchaTimeoutError,
+    CdpUnrecoverable,
+    CekiError,
+    ConnectionLost,
+    InsufficientFunds,
+    NotOwner,
     ProviderDisconnected,
-    ProviderNotVerified,
-    RateLimited,
-    SessionEndedError,
+    RateLimitExceeded,
+    SessionEnded,
+    SessionExpired,
+    SessionNotFound,
 )
-from .chat import ChatAPI
-from .session import Session
-from .transport_rtc import RTCTransport
-from .types import (
-    ChatMessage,
-    HtmlResult,
-    HumanActionResult,
-    NavigateResult,
-    QueryResult,
-    ScreenshotResult,
-    TypingEvent,
-)
+from ._models import BrowserOption, ChatMessage, Match, ReadReceipt, SessionInfo, Snapshot
+from .humanize import HumanProfile
 
+__version__ = "2.15.1"
 __all__ = [
+    "connect",
+    "ConnectOptions",
+    "Client",
     "Browser",
-    "ChatAPI",
-    "ChatClient",
-    "HumanProfile",
-    "Humanizer",
-    "Session",
-    "RTCTransport",
-    "AuthError",
-    "CekiBrowserError",
-    "CommandTimeout",
-    "HumanActionDeclined",
-    "HumanActionTimeout",
-    "NavigationTimeout",
-    "ProviderDisconnected",
-    "ProviderNotVerified",
-    "NoMatchError",
-    "RateLimited",
-    "SessionEndedError",
+    "BrowserOption",
+    "Match",
     "ChatMessage",
-    "HtmlResult",
-    "HumanActionResult",
-    "NavigateResult",
-    "QueryResult",
-    "ScreenshotResult",
-    "TypingEvent",
+    "ReadReceipt",
+    "RateLimitExceeded",
+    "InsufficientFunds",
+    "SessionEnded",
+    "CdpUnrecoverable",
+    "AuthFailed",
+    "ConnectionLost",
+    "ProviderDisconnected",
+    "SessionNotFound",
+    "SessionExpired",
+    "NotOwner",
+    "SessionInfo",
+    "Snapshot",
+    "BrowserProfile",
+    "CekiError",
+    "HumanProfile",
+    "CaptchaResult",
+    "CaptchaError",
+    "CaptchaTimeoutError",
 ]
-
-__version__ = "0.3.0"

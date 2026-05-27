@@ -1,12 +1,8 @@
 # ceki-browser
 
-> Real browsers of real people. 5-line API. Secure P2P via WebRTC.
+Python SDK for [ceki.me](https://ceki.me) — rent real browsers from real people for AI agent automation.
 
-Python SDK for [browser.ceki.me](https://browser.ceki.me) — rent real browsers from real people for AI agent automation.
-
-Browser commands travel over a direct WebRTC DataChannel between your agent and the provider's browser. Chat messages are routed through the relay server. The relay handles signaling, matchmaking, and chat. Connections are authenticated via STUN/TURN with identity validation.
-
-## Installation
+## Install
 
 ```bash
 pip install ceki-browser
@@ -16,221 +12,269 @@ pip install ceki-browser
 
 ```python
 import asyncio
-from ceki_browser import Browser
+import os
+from ceki_browser import connect, ConnectOptions
 
 async def main():
-    async with Browser(token="YOUR_TOKEN") as br:
-        async with await br.session(mode="incognito", domain_hints=["example.com"]) as s:
-            await s.navigate("https://example.com")
-            title = await s.query("h1")
-            print(title.text)
+    client = await connect(os.environ["CEKI_API_KEY"])
+    options = await client.search({"geo": "US", "language": "en"})
+    browser = await client.rent(options[0].schedule_id)
+    # ... CDP calls (see docs)
+    await browser.close()
+    await client.close()
 
 asyncio.run(main())
 ```
 
-## Configuration
+**BREAKING in 2.2.0:** `connect()` no longer accepts `relay_url=` or `reconnect=` kwargs — pass a `ConnectOptions` object instead.
 
-| Parameter | Default | Description |
-|---|---|---|
-| `token` | — | Sanctum API token from your [dashboard](https://browser.ceki.me/dashboard) |
-| `relay_url` | `wss://browser.ceki.me/ws/agent` | WebSocket relay endpoint |
-
-### Session options
-
-| Parameter | Default | Description |
-|---|---|---|
-| `mode` | `"incognito"` | `"incognito"` (clean browser) or `"persona"` (real user cookies) |
-| `domain_hints` | `[]` | Preferred domains for provider matching |
-| `geo` | `""` | Preferred provider geo (e.g. `"US"`, `"DE"`) |
-| `language` | `""` | Preferred browser language |
-| `max_price_per_min` | `1.0` | Maximum price you're willing to pay per minute (USD) |
-| `estimated_duration_min` | `30` | Estimated session duration for provider matching |
-
-## Methods
-
-| Method | Parameters | Returns | Description |
-|---|---|---|---|
-| `navigate(url)` | `url`, `timeout_ms=120000` | `NavigateResult` | Navigate to URL |
-| `query(selector)` | `selector`, `attributes=["textContent"]` | `QueryResult` | Query first matching element |
-| `query_all(selector)` | `selector`, `attributes`, `limit=20` | `QueryResult` | Query all matching elements |
-| `get_html(selector)` | `selector="html"`, `outer=True` | `HtmlResult` | Get element HTML |
-| `click(selector)` | `selector` or `x`/`y` coordinates | — | Click element or coordinates |
-| `type(selector, text)` | `selector`, `text`, `delay_ms=0` | — | Type text into input |
-| `scroll(selector)` | `selector` or `direction`/`amount` | — | Scroll to element or direction |
-| `screenshot()` | `format="png"`, `quality=80` | `ScreenshotResult` | Capture visible tab |
-| `back()` / `forward()` / `reload()` | — | `NavigateResult` | Navigation controls |
-| `inject_credentials(secret_id, target)` | `secret_id`, `target` selectors | `dict` | Fill credentials from vault |
-| `request_human_action(type, message)` | `action_type`, `message`, `timeout_sec=120` | `HumanActionResult` | Ask browser owner for help |
-
-### Credential Vault
-
-`inject_credentials` fills login forms using encrypted secrets stored on the provider side.
-The SDK sends a `secret_id` — the provider extension decrypts and injects credentials locally (RSA-OAEP + AES-256-GCM).
-
-Create secrets via dashboard: **API Keys & Secrets** section.
-
-## Errors
-
-| Error | When |
-|---|---|
-| `AuthError` | Invalid or expired token |
-| `ProviderDisconnected` | Provider went offline during session |
-| `NavigationTimeout` | `navigate()` exceeded timeout |
-| `CommandTimeout` | Any command exceeded timeout |
-| `RateLimited` | Too many sessions/commands per hour |
-| `ProviderNotVerified` | `inject_credentials` requires a verified provider |
-| `HumanActionDeclined` | Browser owner declined the action |
-| `HumanActionTimeout` | Browser owner didn't respond in time |
-
-## Chat
-
-During a browser session, your agent can exchange messages and images with the browser provider via `session.chat`. Chat is routed through the relay server.
-
-```python
-from ceki_browser import Browser
-
-async def main():
-    async with Browser(token="YOUR_TOKEN") as br:
-        session = await br.session(mode="incognito", domain_hints=["example.com"])
-
-        # Listen for incoming text messages
-        session.chat.on_message(lambda msg: print(f"Provider: {msg.content}"))
-
-        # Send text
-        await session.chat.send("Starting automation, please don't close the browser")
-
-        # Send image (bytes or path)
-        await session.chat.send_image(b"\x89PNG...", "image/png")
-        await session.chat.send_image("screenshot.png")
-
-        # Fetch message history from server
-        messages = await session.chat.history()
-        for msg in messages:
-            print(msg)
-
-        await session.end()
-```
-
-### Direct Chat (chat-service REST + WS)
-
-For server-side chat access (polling, recovery, live push) independent of P2P:
-
-```python
-async with Browser(token=TOKEN) as br:
-    session = await br.session()
-
-    # topic_id from rent or passed manually
-    chat = session.chat_direct(topic_id="<topic_id>")
-
-    # Fetch message history (forward cursor)
-    msgs = await chat.history(after="<last_known_id>", limit=50)
-
-    # Send a message via REST
-    await chat.send("Hello from agent")
-
-    # Subscribe to live push via WebSocket
-    async def on_msg(msg):
-        print("new:", msg.get("content"))
-
-    await chat.subscribe(on_msg)
-
-    # ... do work ...
-    await chat.close()
-```
-
-Set `CEKI_CHAT_SERVICE_URL` env var to override the chat-service URL (default: `https://chat.ceki.me`).
-
-## Human Mode
-
-SDK includes built-in human-like behavior simulation (delays, typing jitter) enabled by default.
-
-### Profiles
-
-```python
-# Default — natural delays (enabled by default)
-async with Browser(token, human="natural") as br:
-    s = await br.session()
-
-# Careful — slower, more human-like
-async with Browser(token, human="careful") as br:
-    s = await br.session()
-
-# Disabled — no delays
-async with Browser(token, human=None) as br:
-    s = await br.session()
-
-# Custom profile from dict
-async with Browser(token, human={"typing": {"wpm": 140}, "pre_action_ms": {"click": [50, 200]}}) as br:
-    s = await br.session()
-
-# Custom profile from JSON file
-async with Browser(token, human="./my_profile.json") as br:
-    s = await br.session()
-```
-
-### Runtime Profile Change
-
-```python
-prev = s.set_human("careful")  # switch to careful
-await s.type("#email", "user@example.com")
-s.set_human(prev)  # restore previous
-```
-
-### Profile JSON Schema
-
-```json
-{
-  "version": 1,
-  "name": "natural",
-  "typing": {
-    "wpm": 110,
-    "jitter": 0.35,
-    "thinking_pause_prob": 0.012,
-    "thinking_pause_ms": [300, 1200],
-    "typo_prob": 0.0
-  },
-  "pre_action_ms": {
-    "click": [80, 350],
-    "type": [120, 500],
-    "scroll": [50, 250],
-    "navigate": [0, 0],
-    "screenshot": [0, 0]
-  },
-  "post_action_ms": {
-    "click": [150, 800],
-    "type": [150, 800],
-    "scroll": [200, 900],
-    "navigate": [400, 1800],
-    "screenshot": [0, 0]
-  },
-  "mouse": {
-    "move_before_click": false,
-    "trajectory": "off"
-  },
-  "rng_seed": null
-}
-```
-
-### Environment Variables
+## Environment Variables
 
 | Variable | Description |
 |---|---|
-| `CEKI_HUMAN_PROFILE` | Preset name (`natural`, `careful`) |
-| `CEKI_HUMAN_PROFILE_PATH` | Path to custom JSON profile |
-| `CEKI_HUMAN_DISABLE=1` | Disable all human-mode delays |
+| `CEKI_API_KEY` | Your API key (required) |
+| `CEKI_API_URL` | Override REST API base URL |
+| `CEKI_RELAY_URL` | Override relay WebSocket URL |
 
-Priority: explicit `Browser(human=...)` > env vars > default (`natural`).
+## API
 
-## Examples
+### `connect(api_key, options: ConnectOptions | None = None) -> Client`
 
-- [`quickstart.py`](examples/quickstart.py) — minimal 5-line example
-- [`scraping.py`](examples/scraping.py) — query DOM elements
-- [`login_flow.py`](examples/login_flow.py) — inject credentials + 2FA
+Establish a WebSocket connection to the relay. Returns a `Client` instance.
 
-## Pricing
+### `ConnectOptions`
 
-See [browser.ceki.me/pricing](https://browser.ceki.me/pricing).
+| Field | Default | Description |
+|---|---|---|
+| `api_url` | `https://api.ceki.me` | REST API base URL |
+| `relay_url` | `wss://browser.ceki.me/ws/agent` | Relay WebSocket URL |
+| `basic_auth` | `None` | `(user, password)` for nginx htpasswd |
+| `reconnect` | `True` | Auto-reconnect on disconnect |
 
-## License
+### `client.search(filters=None, limit=20) -> list[BrowserOption]`
 
-MIT
+Search for available browsers. Filters: `geo`, `language`, etc.
+
+### `client.rent(schedule_id) -> Browser`
+
+Rent a browser by schedule ID. Waits up to 60s for a match.
+
+### `client.close()`
+
+Close all sessions and the connection.
+
+## Error Codes
+
+| Exception | Cause |
+|---|---|
+| `AuthFailed` | Invalid API key or token revoked |
+| `RateLimitExceeded` | Too many requests. Has `.retry_after` (seconds) |
+| `InsufficientFunds` | Account balance too low |
+| `SessionEnded` | Provider ended the session. Has `.reason` |
+| `CdpUnrecoverable` | CDP connection lost permanently |
+| `ConnectionLost` | Relay connection lost after max reconnects |
+
+## Session profile (cookies + storage)
+
+`browser.profile` lets you snapshot and restore cookies, `localStorage`, and `sessionStorage` between sessions — without involving the relay or backend. The blob stays in your own storage.
+
+```python
+import json
+
+# First session — sign up, then export profile
+async with await client.rent(schedule_id) as browser:
+    await browser.send({"method": "Page.navigate", "params": {"url": "https://reddit.com/login"}})
+    # ... perform signup, 2FA ...
+    profile = await browser.profile.export(domains=[".reddit.com", "reddit.com"])
+
+with open("reddit_profile.json", "w") as f:
+    json.dump(profile, f)
+
+# Next session — restore profile (navigate first, then import storage)
+with open("reddit_profile.json") as f:
+    profile = json.load(f)
+
+async with await client.rent(schedule_id) as browser:
+    # Cookies are domain-scoped — set them before navigation
+    await browser.profile.import_(profile)
+    await browser.send({"method": "Page.navigate", "params": {"url": "https://reddit.com"}})
+    # already logged in
+```
+
+**Notes:**
+- `localStorage`/`sessionStorage` require a document context — navigate to the target origin before calling `import_()`, or call it right after navigation.
+- Cookies (`Network.setCookies`) work before any navigation.
+- Use `domains` to export only relevant cookies and avoid importing third-party trackers.
+- Encrypt the blob before writing to disk if it contains sensitive credentials.
+- `import_()` raises `ValueError` on `schema_version` mismatch (future-proofing).
+
+## CDP Lifecycle
+
+The relay maintains the CDP connection to the incognito browser tab. If the connection drops, it automatically reattaches with 1s/2s/4s exponential backoff. Commands during reattach are buffered (FIFO, max 50). If 3 reattach attempts fail, a new fallback tab is created. If that also fails, `cdp_unrecoverable` error is sent.
+
+## Real-signup examples
+
+See `examples/SMOKE.md` for full runbook.
+
+Quick:
+```bash
+pip install -e ".[dev]"
+export CEKI_API_KEY=...
+export SCHEDULE_ID=...
+python examples/reddit_signup.py
+```
+
+These are NOT automated tests — they require a live relay, an online provider, and a real IMAP mailbox. Run manually as part of Phase 2 acceptance.
+
+## Human Mode
+
+Browser actions can optionally include human-like timing — delays before/after actions and per-character typing with jitter.
+
+```python
+# Default: natural profile (enabled by default)
+browser = await client.rent(schedule_id)
+
+# Explicit profile
+browser = await client.rent(schedule_id, human="careful")
+
+# Disable humanization
+browser = await client.rent(schedule_id, human=None)
+
+# Custom profile dict
+browser = await client.rent(schedule_id, human={"typing": {"wpm": 130}})
+```
+
+### High-level methods
+
+```python
+await browser.navigate("https://example.com")
+await browser.click(100, 200)
+await browser.type("Hello, world!")  # Per-char with jitter when human mode on
+await browser.scroll(delta_y=-300)
+img_bytes = await browser.screenshot()
+```
+
+### Runtime control
+
+```python
+prev = browser.set_human("careful")  # Switch profile, returns previous
+browser.set_human(None)               # Disable mid-session
+```
+
+### Environment variables
+
+- `CEKI_HUMAN_PROFILE` — Override default profile name (e.g., `careful`)
+- `CEKI_HUMAN_PROFILE_PATH` — Path to custom JSON profile file
+- `CEKI_HUMAN_DISABLE=1` — Disable humanization entirely
+
+## CLI
+
+Both SDKs install a single `ceki-browser` binary on your PATH. Same command set whether you came from Python or Node.js.
+
+### Install
+
+Python:
+```bash
+pip install ceki-browser
+```
+
+Node.js:
+```bash
+npm install -g ceki-browser
+```
+
+### Environment variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `CEKI_API_KEY` | yes | Agent token (`ag_...`) |
+| `CEKI_API_URL` | no | Override API base URL (default: `https://api.ceki.me`) |
+| `CEKI_RELAY_URL` | no | Override relay WS URL (default: `wss://browser.ceki.me/ws/agent`) |
+| `CEKI_CHAT_URL` | no | Override chat-service URL |
+| `CEKI_BASIC_AUTH_USER` / `_PASS` | no | HTTP Basic Auth for protected dev/stage endpoints |
+
+### Quick start
+
+```bash
+export CEKI_API_KEY=ag_...
+
+SCHEDULE=$(ceki-browser search --limit 1 | jq -r '.[0].schedule_id')
+SID=$(ceki-browser rent --schedule $SCHEDULE | jq -r .session_id)
+ceki-browser navigate $SID https://example.com
+ceki-browser snapshot $SID -o snap.png
+ceki-browser stop $SID
+```
+
+The CLI persists session state locally — after `rent` it saves the session ID so subsequent commands resume it by SID without re-renting.
+
+### Commands
+
+#### Discovery and lifecycle
+
+| Command | Description |
+|---|---|
+| `search [--limit N] [--filter K=V]…` | List available browsers |
+| `my-browsers` | List browsers with pre-arranged rent contracts |
+| `rent --schedule ID [--mode incognito\|main] [--fingerprint-from FILE]` | Rent a browser |
+| `sessions [--all] [--limit N] [--json]` | List your sessions |
+| `stop SID` | End a session |
+| `wait SID` | Block until the session ends |
+
+#### Browser control
+
+| Command | Description |
+|---|---|
+| `navigate SID URL` | Open URL |
+| `click SID X Y` | Click at viewport coordinates |
+| `type SID TEXT [--natural]` | Type text into focused element |
+| `scroll SID X Y DY` | Scroll from (X, Y) by `DY` pixels |
+| `screenshot SID -o FILE [--format png\|jpeg] [--full]` | Save screenshot |
+| `snapshot SID -o FILE` | Screenshot + new chat messages |
+| `switch-tab SID` | Switch active tab |
+| `upload SID --selector CSS --file PATH [--filename NAME]` | Attach file to `<input type="file">` |
+
+#### Chat with host
+
+| Command | Description |
+|---|---|
+| `chat SID send TEXT` | Send message to host |
+| `chat SID next [--timeout SEC]` | Wait for next host message |
+| `chat SID history [--since TS] [--limit N]` | Fetch chat history |
+| `chat SID send-image --image PATH [--text MSG]` | Send image to host |
+
+#### Advanced
+
+| Command | Description |
+|---|---|
+| `profile SID export -o FILE [--domains CSV] [--no-session-storage]` | Export cookies / localStorage |
+| `profile SID import -i FILE` | Import previously exported profile |
+| `request-captcha SID [--acceptance SEC] [--completion SEC] [--manual]` | Ask host to solve CAPTCHA |
+| `configure SID [--masking-mode VAL] [--fingerprint VAL]` | Toggle masking / fingerprint |
+| `cdp SID --method METHOD [--params JSON]` | Raw CDP command |
+
+### Output and errors
+
+Successful commands write a single JSON line to stdout. Errors go to stderr as `{"error": "...", "code": "..."}`. Pipe stdout through `jq` to chain commands.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | success |
+| `1` | generic error |
+| `2` | `CEKI_API_KEY` not set |
+| `3` | session not found or not owner |
+| `4` | timeout |
+| `5` | network / connection error |
+| `130` | interrupted (Ctrl-C) |
+
+Full reference (with EN+RU): https://browser.ceki.me/docs#cli
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest
+ruff check ceki_browser/
+mypy ceki_browser/
+```
