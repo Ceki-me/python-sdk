@@ -359,7 +359,8 @@ async def _cmd_upload(args: argparse.Namespace) -> None:
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
         result = await browser.upload(
-            args.selector, file_path, filename=args.filename
+            args.selector, file_path, filename=args.filename,
+            mime_type=getattr(args, "mime_type", None),
         )
         _out(result)
     except ValueError as e:
@@ -509,6 +510,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_upload.add_argument("--selector", required=True, help="CSS selector for file input")
     p_upload.add_argument("--file", required=True, dest="file_path", help="Path to file")
     p_upload.add_argument("--filename", help="Override filename (default: basename)")
+    p_upload.add_argument("--mime", dest="mime_type", help="Override MIME type (default: auto-detect from extension)")
 
     p_captcha = sub.add_parser("request-captcha", help="Request human to solve captcha")
     p_captcha.add_argument("session_id", help="Session ID")

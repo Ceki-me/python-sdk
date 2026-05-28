@@ -315,12 +315,40 @@ class Browser:
             self._last_seen_ts = all_msgs[-1].created_at
         return Snapshot(screenshot=screenshot_b64, chat=all_msgs, ts=datetime.now(timezone.utc))
 
+    _MIME_MAP: dict[str, str] = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".avif": "image/avif",
+        ".svg": "image/svg+xml",
+        ".pdf": "application/pdf",
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".json": "application/json",
+        ".txt": "text/plain",
+        ".csv": "text/csv",
+        ".html": "text/html",
+        ".xml": "application/xml",
+        ".zip": "application/zip",
+    }
+
+    @staticmethod
+    def _detect_mime(filename: str) -> str:
+        ext = Path(filename).suffix.lower()
+        if ext in Browser._MIME_MAP:
+            return Browser._MIME_MAP[ext]
+        guessed, _ = mimetypes.guess_type(filename)
+        return guessed or "application/octet-stream"
+
     async def upload(
         self,
         selector: str,
         source: str | Path | bytes,
         *,
         filename: str | None = None,
+        mime_type: str | None = None,
     ) -> dict:
         """Upload a file to an ``<input type="file">`` element.
 
@@ -328,6 +356,7 @@ class Browser:
             selector: CSS selector for the file input element.
             source: File path (str/Path) or raw bytes.
             filename: Override the filename (default: basename of path or ``upload.bin``).
+            mime_type: Override MIME type (default: auto-detect from extension).
 
         Returns:
             ``{"ok": True, "filename": "...", "size": N}`` on success.
@@ -349,9 +378,10 @@ class Browser:
         else:
             raise TypeError(f"source must be str, Path, or bytes, got {type(source).__name__}")
 
-        mime_type, _ = mimetypes.guess_type(filename)
         if mime_type is None:
-            mime_type = "application/octet-stream"
+            mime_type = self._detect_mime(filename)
+
+        log.info("upload: file=%s mime=%s size=%d", filename, mime_type, len(data))
 
         b64_data = base64.b64encode(data).decode("ascii")
 
@@ -389,6 +419,18 @@ class Browser:
 
         if "error" in parsed:
             raise ValueError(parsed["error"])
+
+        try:
+            await self.send({
+                "method": "Input.dispatchKeyEvent",
+                "params": {"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27, "nativeVirtualKeyCode": 27},
+            })
+            await self.send({
+                "method": "Input.dispatchKeyEvent",
+                "params": {"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27, "nativeVirtualKeyCode": 27},
+            })
+        except Exception:
+            pass
 
         return parsed
 
