@@ -84,7 +84,8 @@ class BrowserProfile:
         version = profile.get("schema_version", 1)
         if version not in SUPPORTED_SCHEMA_VERSIONS:
             raise ValueError(
-                f"unsupported profile schema_version={version}, expected one of {SUPPORTED_SCHEMA_VERSIONS}"
+                f"unsupported profile schema_version={version},"
+                f" expected one of {SUPPORTED_SCHEMA_VERSIONS}"
             )
 
         cookies = profile.get("cookies", [])

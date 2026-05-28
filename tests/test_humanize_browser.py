@@ -1,10 +1,13 @@
 """Tests for Browser humanization integration."""
 from __future__ import annotations
+
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
+
 from ceki_sdk._browser import Browser, _resolve_human
-from ceki_sdk.humanize import HumanProfile, Humanizer
+from ceki_sdk.humanize import Humanizer, HumanProfile
 
 
 def _make_browser(human="natural"):
@@ -54,14 +57,16 @@ class TestBrowserHumanNone:
     """human=None means zero overhead."""
 
     @pytest.mark.asyncio
-    async def test_type_sends_single_insert(self):
+    async def test_type_sends_per_char_keystrokes(self):
         b = _make_browser(human=None)
         b.send = AsyncMock(return_value={})
         await b.type("hello")
-        b.send.assert_called_once()
-        call_args = b.send.call_args[0][0]
-        assert call_args["method"] == "Input.insertText"
-        assert call_args["params"]["text"] == "hello"
+        key_down_calls = [
+            c for c in b.send.call_args_list
+            if c[0][0].get("method") == "Input.dispatchKeyEvent"
+            and c[0][0]["params"].get("type") == "keyDown"
+        ]
+        assert len(key_down_calls) == 5
 
     @pytest.mark.asyncio
     async def test_click_no_sleep(self):
@@ -87,9 +92,12 @@ class TestBrowserHumanNatural:
         b = _make_browser(human="natural")
         b.send = AsyncMock(return_value={})
         await b.type("abc")
-        insert_calls = [c for c in b.send.call_args_list
-                        if c[0][0].get("method") == "Input.insertText"]
-        assert len(insert_calls) == 3
+        key_down_calls = [
+            c for c in b.send.call_args_list
+            if c[0][0].get("method") == "Input.dispatchKeyEvent"
+            and c[0][0]["params"].get("type") == "keyDown"
+        ]
+        assert len(key_down_calls) == 3
 
     @pytest.mark.asyncio
     async def test_click_timing_variance(self):

@@ -74,7 +74,9 @@ async def test_screenshot_full_page_sends_layout_metrics_and_clip(browser: Brows
     capture_call = browser.send.call_args_list[1].args[0]
     assert capture_call["method"] == "Page.captureScreenshot"
     assert capture_call["params"]["captureBeyondViewport"] is True
-    assert capture_call["params"]["clip"] == {"x": 0, "y": 0, "width": 1280, "height": 5000, "scale": 1}
+    assert capture_call["params"]["clip"] == {
+        "x": 0, "y": 0, "width": 1280, "height": 5000, "scale": 1,
+    }
 
 
 async def test_screenshot_full_page_clamps_height(browser: Browser, caplog):

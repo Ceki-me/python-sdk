@@ -8,17 +8,22 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import connect, ConnectOptions
+from . import ConnectOptions, connect
 from ._exceptions import (
     AuthFailed,
     CaptchaTimeoutError,
     CekiError,
     ConnectionLost,
-    SessionNotFound,
-    SessionExpired,
     NotOwner,
+    SessionExpired,
+    SessionNotFound,
 )
-from ._state import save_session, load_session, delete_session, get_last_seen_ts, update_last_seen_ts
+from ._state import (
+    delete_session,
+    get_last_seen_ts,
+    save_session,
+    update_last_seen_ts,
+)
 
 
 def _out(data: Any) -> None:
@@ -258,7 +263,11 @@ async def _cmd_sessions(args: argparse.Namespace) -> None:
             if not results:
                 print("No sessions found.")
                 return
-            header = f"{'SID':<8}{'SCHEDULE':<10}{'STARTED':<22}{'DURATION':<10}{'EARNED':<9}{'STATUS':<10}{'RENTER':<16}{'PROVIDER'}"
+            header = (
+                f"{'SID':<8}{'SCHEDULE':<10}{'STARTED':<22}"
+                f"{'DURATION':<10}{'EARNED':<9}{'STATUS':<10}"
+                f"{'RENTER':<16}{'PROVIDER'}"
+            )
             print(header)
             for s in results:
                 started = (s.started_at.strftime("%Y-%m-%dT%H:%M:%SZ") if s.started_at else "—")
@@ -359,7 +368,8 @@ async def _cmd_upload(args: argparse.Namespace) -> None:
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
         result = await browser.upload(
-            args.selector, file_path, filename=args.filename
+            args.selector, file_path, filename=args.filename,
+            mime_type=getattr(args, "mime_type", None),
         )
         _out(result)
     except ValueError as e:
@@ -384,7 +394,12 @@ async def _cmd_request_captcha(args: argparse.Namespace) -> None:
         if not result.solved:
             sys.exit(1)
     except CaptchaTimeoutError as e:
-        _out({"solved": False, "cancel_reason": f"timeout:{e.phase}", "child_event_id": None, "correction_id": None})
+        _out({
+            "solved": False,
+            "cancel_reason": f"timeout:{e.phase}",
+            "child_event_id": None,
+            "correction_id": None,
+        })
         sys.exit(1)
     finally:
         if client._ws:
@@ -410,7 +425,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_rent = sub.add_parser("rent", help="Rent a browser")
     p_rent.add_argument("--schedule", type=int, required=True, help="Schedule ID")
-    p_rent.add_argument("--mode", choices=["incognito", "main"], default="incognito", help="Profile mode (default: incognito)")
+    p_rent.add_argument(
+        "--mode", choices=["incognito", "main"],
+        default="incognito", help="Profile mode (default: incognito)",
+    )
     p_rent.add_argument("--fingerprint-from", help="Path to profile JSON with fingerprint data")
 
     p_snap = sub.add_parser("snapshot", help="Take screenshot + get new chat messages")
@@ -509,12 +527,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_upload.add_argument("--selector", required=True, help="CSS selector for file input")
     p_upload.add_argument("--file", required=True, dest="file_path", help="Path to file")
     p_upload.add_argument("--filename", help="Override filename (default: basename)")
+    p_upload.add_argument(
+        "--mime", dest="mime_type",
+        help="Override MIME type (default: auto-detect from extension)",
+    )
 
     p_captcha = sub.add_parser("request-captcha", help="Request human to solve captcha")
     p_captcha.add_argument("session_id", help="Session ID")
-    p_captcha.add_argument("--acceptance", type=float, default=60, help="Acceptance timeout sec (min 30)")
-    p_captcha.add_argument("--completion", type=float, default=120, help="Completion timeout sec (min 30)")
-    p_captcha.add_argument("--manual", action="store_true", help="Disable auto-accept (agent votes manually)")
+    p_captcha.add_argument(
+        "--acceptance", type=float, default=60,
+        help="Acceptance timeout sec (min 30)",
+    )
+    p_captcha.add_argument(
+        "--completion", type=float, default=120,
+        help="Completion timeout sec (min 30)",
+    )
+    p_captcha.add_argument(
+        "--manual", action="store_true",
+        help="Disable auto-accept (agent votes manually)",
+    )
 
     p_cdp = sub.add_parser("cdp", help="Send raw CDP command")
     p_cdp.add_argument("session_id", help="Session ID")

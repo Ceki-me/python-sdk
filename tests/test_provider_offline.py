@@ -4,15 +4,17 @@ import asyncio
 
 import pytest
 
-from ceki_sdk import Client, ConnectOptions, connect
+from ceki_sdk import ConnectOptions, connect
 from ceki_sdk._exceptions import ProviderOffline
 
 from .conftest import MockRelayServer
 
 
 @pytest.mark.asyncio
-async def test_rent_error_provider_offline_raises_provider_offline(mock_relay: MockRelayServer) -> None:
-    """relay sends rent.error provider_offline after probe timeout → ProviderOffline raised."""
+async def test_rent_error_provider_offline_raises_provider_offline(
+    mock_relay: MockRelayServer,
+) -> None:
+    """relay sends rent.error provider_offline after probe timeout."""
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
@@ -38,8 +40,10 @@ async def test_rent_error_provider_offline_raises_provider_offline(mock_relay: M
 
 
 @pytest.mark.asyncio
-async def test_rent_error_provider_offline_without_event_id(mock_relay: MockRelayServer) -> None:
-    """rent.error provider_offline without event_id (early, before rent_pending) → ProviderOffline."""
+async def test_rent_error_provider_offline_without_event_id(
+    mock_relay: MockRelayServer,
+) -> None:
+    """rent.error provider_offline without event_id (before rent_pending)."""
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 

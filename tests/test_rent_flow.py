@@ -4,11 +4,10 @@ import asyncio
 
 import pytest
 
-from ceki_sdk import Client, ConnectOptions, connect
+from ceki_sdk import ConnectOptions, connect
 from ceki_sdk._exceptions import (
     ProviderOffline,
     RateLimitExceeded,
-    SessionEnded,
 )
 from tests.test_profile import SAMPLE_FINGERPRINT
 
@@ -76,7 +75,9 @@ async def test_rent_error_with_event_id_raises_exception(mock_relay: MockRelaySe
 
 
 @pytest.mark.asyncio
-async def test_rent_early_error_without_event_id_raises_exception(mock_relay: MockRelayServer) -> None:
+async def test_rent_early_error_without_event_id_raises_exception(
+    mock_relay: MockRelayServer,
+) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
@@ -128,7 +129,9 @@ async def test_rent_with_fingerprint_dict_sends_configure(mock_relay: MockRelayS
 
 
 @pytest.mark.asyncio
-async def test_rent_with_fingerprint_false_sends_configure_false(mock_relay: MockRelayServer) -> None:
+async def test_rent_with_fingerprint_false_sends_configure_false(
+    mock_relay: MockRelayServer,
+) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
@@ -146,7 +149,7 @@ async def test_rent_with_fingerprint_false_sends_configure_false(mock_relay: Moc
         "price_per_min": 0.01,
     })
 
-    browser = await asyncio.wait_for(rent_task, timeout=5)
+    await asyncio.wait_for(rent_task, timeout=5)
     await asyncio.sleep(0.1)
 
     configure_msgs = [m for m in mock_relay.received if m.get("type") == "session.configure"]
@@ -175,7 +178,7 @@ async def test_rent_with_fingerprint_true_no_configure(mock_relay: MockRelayServ
         "price_per_min": 0.01,
     })
 
-    browser = await asyncio.wait_for(rent_task, timeout=5)
+    await asyncio.wait_for(rent_task, timeout=5)
 
     configure_msgs = [m for m in mock_relay.received if m.get("type") == "session.configure"]
     assert len(configure_msgs) == 0

@@ -10,11 +10,16 @@ from ceki_sdk._models import ChatMessage, ReadReceipt
 
 @pytest.fixture
 async def chat_browser(mock_relay):
-    client = await connect("test-key", ConnectOptions(relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent"))
+    url = f"ws://127.0.0.1:{mock_relay.port}/ws/agent"
+    client = await connect("test-key", ConnectOptions(relay_url=url))
 
     async def ack_rent():
         await asyncio.sleep(0.05)
-        await mock_relay.send_to_all({"type": "rent_pending", "event_id": "ev-chat", "schedule_id": 1})
+        await mock_relay.send_to_all({
+            "type": "rent_pending",
+            "event_id": "ev-chat",
+            "schedule_id": 1,
+        })
         await asyncio.sleep(0.02)
         await mock_relay.send_to_all({
             "type": "match",
@@ -34,11 +39,16 @@ async def chat_browser(mock_relay):
 
 @pytest.fixture
 async def chat_browser_no_topic(mock_relay):
-    client = await connect("test-key", ConnectOptions(relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent"))
+    url = f"ws://127.0.0.1:{mock_relay.port}/ws/agent"
+    client = await connect("test-key", ConnectOptions(relay_url=url))
 
     async def ack_rent():
         await asyncio.sleep(0.05)
-        await mock_relay.send_to_all({"type": "rent_pending", "event_id": "ev-notopic", "schedule_id": 1})
+        await mock_relay.send_to_all({
+            "type": "rent_pending",
+            "event_id": "ev-notopic",
+            "schedule_id": 1,
+        })
         await asyncio.sleep(0.02)
         await mock_relay.send_to_all({
             "type": "match",

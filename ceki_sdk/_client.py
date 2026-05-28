@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import websockets
@@ -24,6 +24,9 @@ from ._exceptions import (
     SessionNotFound,
 )
 from ._models import BrowserOption, Match
+
+if TYPE_CHECKING:
+    from ._models import SessionInfo
 
 log = logging.getLogger(__name__)
 
@@ -99,7 +102,10 @@ class Client:
             self._stashed_first_frame = None
         except websockets.exceptions.ConnectionClosedError as exc:
             if exc.rcvd and exc.rcvd.code in (4401, 4403):
-                raise AuthFailed(f"ws closed with code {exc.rcvd.code}: {exc.rcvd.reason or 'auth_failed'}") from exc
+                reason = exc.rcvd.reason or 'auth_failed'
+                raise AuthFailed(
+                    f"ws closed with code {exc.rcvd.code}: {reason}"
+                ) from exc
             raise
 
         self._last_pong = time.monotonic()
@@ -135,7 +141,8 @@ class Client:
         headers: dict[str, str] = {"Authorization": f"Bearer {self.api_key}"}
         if self._basic_auth:
             import base64
-            creds = base64.b64encode(f"{self._basic_auth[0]}:{self._basic_auth[1]}".encode()).decode()
+            raw = f"{self._basic_auth[0]}:{self._basic_auth[1]}"
+            creds = base64.b64encode(raw.encode()).decode()
             headers["X-Basic-Auth"] = f"Basic {creds}"
         async with httpx.AsyncClient() as http:
             resp = await http.get(
@@ -152,7 +159,8 @@ class Client:
         headers: dict[str, str] = {"Authorization": f"Bearer {self.api_key}"}
         if self._basic_auth:
             import base64
-            creds = base64.b64encode(f"{self._basic_auth[0]}:{self._basic_auth[1]}".encode()).decode()
+            raw = f"{self._basic_auth[0]}:{self._basic_auth[1]}"
+            creds = base64.b64encode(raw.encode()).decode()
             headers["X-Basic-Auth"] = f"Basic {creds}"
         async with httpx.AsyncClient() as http:
             resp = await http.get(url, headers=headers)
@@ -276,9 +284,13 @@ class Client:
                 if exc.rcvd and exc.rcvd.code in (4401, 4403):
                     # Server rejected auth post-handshake
                     self._closed = True
+                    reason = exc.rcvd.reason
+                    err = AuthFailed(
+                        f"ws closed with code {exc.rcvd.code}: {reason}"
+                    )
                     for fut in list(self._pending_rent_queue):
                         if not fut.done():
-                            fut.set_exception(AuthFailed(f"ws closed with code {exc.rcvd.code}: {exc.rcvd.reason}"))
+                            fut.set_exception(err)
                     self._pending_rent_queue.clear()
                     return
                 if not self._closed and self.reconnect:
@@ -315,9 +327,13 @@ class Client:
         if mtype == "rent.error":
             code = msg.get("code", "")
             message = msg.get("message", "rent failed")
-            server_event_id = str(msg.get("event_id", "")) if msg.get("event_id") is not None else None
+            eid = msg.get("event_id")
+            server_event_id = str(eid) if eid is not None else None
             from ._exceptions import ProviderOffline
-            exc_to_raise: Exception = ProviderOffline(message) if code == "provider_offline" else CekiError(message)
+            if code == "provider_offline":
+                exc_to_raise: Exception = ProviderOffline(message)
+            else:
+                exc_to_raise = CekiError(message)
             fut: asyncio.Future[Match] | None = None
             if server_event_id:
                 fut = self._pending_rents.pop(server_event_id, None)

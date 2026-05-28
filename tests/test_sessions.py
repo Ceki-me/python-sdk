@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from ceki_sdk import Client, ConnectOptions, SessionInfo, connect
+from ceki_sdk import ConnectOptions, SessionInfo, connect
 
 from .conftest import MockRelayServer
 
@@ -83,7 +82,7 @@ async def test_list_sessions_all(mock_relay: MockRelayServer) -> None:
     try:
         patcher, http_mock = _patch_httpx_get()
         with patcher:
-            results = await client.list_sessions(active=False)
+            await client.list_sessions(active=False)
         call_kwargs = http_mock.get.call_args
         params = call_kwargs.kwargs.get("params", {})
         assert params.get("active") == "0"

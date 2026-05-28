@@ -421,14 +421,21 @@ async def scenario_j() -> int:
 
 # ── Scenario registry ──────────────────────────────────────────────────────
 
-AUTOMATIC = {"A": scenario_a, "B": scenario_b, "D": scenario_d, "H": scenario_h, "I": scenario_i, "J": scenario_j}
+AUTOMATIC = {
+    "A": scenario_a, "B": scenario_b, "D": scenario_d,
+    "H": scenario_h, "I": scenario_i, "J": scenario_j,
+}
 MANUAL = {"C": scenario_c, "E": scenario_e, "F": scenario_f, "G": scenario_g}
 ALL_SCENARIOS = {**AUTOMATIC, **MANUAL}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Ceki Browser SDK 2.2.0 integration smoke tests")
-    parser.add_argument("--scenario", default="A", help="Scenario letter(s): A, B, C-G, H-K, all, or comma-separated (e.g. A,I,J)")
+    parser.add_argument(
+        "--scenario", default="A",
+        help="Scenario letter(s): A, B, C-G, H-K, all,"
+        " or comma-separated (e.g. A,I,J)",
+    )
     args = parser.parse_args()
 
     requested = args.scenario.strip()

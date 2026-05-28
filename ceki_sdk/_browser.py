@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Coroutine, Literal, 
 
 import httpx
 
-from .humanize import HumanProfile, Humanizer
+from .humanize import Humanizer, HumanProfile
 
 if TYPE_CHECKING:
     from ._client import Client
@@ -28,6 +28,11 @@ from ._exceptions import (
 from ._models import Match, Snapshot
 
 log = logging.getLogger(__name__)
+
+mimetypes.init()
+for _ext, _mime in {".avif": "image/avif", ".webm": "video/webm", ".woff2": "font/woff2"}.items():
+    if not mimetypes.guess_type(f"x{_ext}")[0]:
+        mimetypes.add_type(_mime, _ext)
 
 EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 TabOpenedCallback = Callable[[str], Awaitable[None]]
@@ -189,7 +194,9 @@ class Browser:
     async def navigate(self, url: str, *, timeout: float = 30.0) -> dict:
         if self._humanizer:
             await self._humanizer.before("navigate")
-        result = await self.send({"method": "Page.navigate", "params": {"url": url}}, timeout=timeout)
+        result = await self.send(
+            {"method": "Page.navigate", "params": {"url": url}}, timeout=timeout,
+        )
         if self._humanizer:
             await self._humanizer.after("navigate")
         return result
@@ -242,7 +249,10 @@ class Browser:
             if self._last_pointer is not None:
                 await self.click(*self._last_pointer)
             else:
-                log.debug("type() called with humanizer but no last_pointer; falling back to plain insertText")
+                log.debug(
+                    "type() called with humanizer but no last_pointer;"
+                    " falling back to plain insertText"
+                )
             await self._humanizer.before("type")
             async for char, delay_ms in self._humanizer.humanize_text(text):
                 await self._send_keystroke(char)
@@ -315,12 +325,18 @@ class Browser:
             self._last_seen_ts = all_msgs[-1].created_at
         return Snapshot(screenshot=screenshot_b64, chat=all_msgs, ts=datetime.now(timezone.utc))
 
+    @staticmethod
+    def _detect_mime(filename: str) -> str:
+        guessed, _ = mimetypes.guess_type(filename)
+        return guessed or "application/octet-stream"
+
     async def upload(
         self,
         selector: str,
         source: str | Path | bytes,
         *,
         filename: str | None = None,
+        mime_type: str | None = None,
     ) -> dict:
         """Upload a file to an ``<input type="file">`` element.
 
@@ -328,6 +344,7 @@ class Browser:
             selector: CSS selector for the file input element.
             source: File path (str/Path) or raw bytes.
             filename: Override the filename (default: basename of path or ``upload.bin``).
+            mime_type: Override MIME type (default: auto-detect from extension).
 
         Returns:
             ``{"ok": True, "filename": "...", "size": N}`` on success.
@@ -349,9 +366,10 @@ class Browser:
         else:
             raise TypeError(f"source must be str, Path, or bytes, got {type(source).__name__}")
 
-        mime_type, _ = mimetypes.guess_type(filename)
         if mime_type is None:
-            mime_type = "application/octet-stream"
+            mime_type = self._detect_mime(filename)
+
+        log.info("upload: file=%s mime=%s size=%d", filename, mime_type, len(data))
 
         b64_data = base64.b64encode(data).decode("ascii")
 
@@ -363,7 +381,8 @@ class Browser:
             "(function() {"
             f"var input = document.querySelector({js_selector});"
             "if (!input) return JSON.stringify({error: 'no input matched'});"
-            "if (input.type !== 'file') return JSON.stringify({error: 'element is not a file input'});"
+            "if (input.type !== 'file')"
+            " return JSON.stringify({error: 'element is not a file input'});"
             f"var b64 = '{b64_data}';"
             "var bin = atob(b64);"
             "var bytes = new Uint8Array(bin.length);"
@@ -389,6 +408,24 @@ class Browser:
 
         if "error" in parsed:
             raise ValueError(parsed["error"])
+
+        try:
+            esc_params = {
+                "key": "Escape",
+                "code": "Escape",
+                "windowsVirtualKeyCode": 27,
+                "nativeVirtualKeyCode": 27,
+            }
+            await self.send({
+                "method": "Input.dispatchKeyEvent",
+                "params": {"type": "keyDown", **esc_params},
+            })
+            await self.send({
+                "method": "Input.dispatchKeyEvent",
+                "params": {"type": "keyUp", **esc_params},
+            })
+        except Exception:
+            pass
 
         return parsed
 

@@ -9,11 +9,16 @@ from ceki_sdk import ConnectOptions, connect
 
 @pytest.fixture
 async def browser_fixture(mock_relay):
-    client = await connect("test-key", ConnectOptions(relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent"))
+    url = f"ws://127.0.0.1:{mock_relay.port}/ws/agent"
+    client = await connect("test-key", ConnectOptions(relay_url=url))
 
     async def ack_rent():
         await asyncio.sleep(0.05)
-        await mock_relay.send_to_all({"type": "rent_pending", "event_id": "ev-tab", "schedule_id": 1})
+        await mock_relay.send_to_all({
+            "type": "rent_pending",
+            "event_id": "ev-tab",
+            "schedule_id": 1,
+        })
         await asyncio.sleep(0.02)
         await mock_relay.send_to_all({
             "type": "match",

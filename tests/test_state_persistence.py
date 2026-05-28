@@ -4,10 +4,8 @@ import base64
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from ceki_sdk import Browser
-from ceki_sdk._state import save_session, load_session, get_last_seen_ts, update_last_seen_ts
+from ceki_sdk._state import get_last_seen_ts, save_session, update_last_seen_ts
 
 
 def _make_browser():

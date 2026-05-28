@@ -3,17 +3,19 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import tempfile
-from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ceki_sdk._state import save_session, load_session, delete_session, get_last_seen_ts, update_last_seen_ts
+from ceki_sdk._state import (
+    delete_session,
+    get_last_seen_ts,
+    load_session,
+    save_session,
+    update_last_seen_ts,
+)
 from ceki_sdk.cli import build_parser
-
 
 # ──────────────────────────────────────────────────────────────────────────
 # State file tests
@@ -408,8 +410,9 @@ async def test_resume_ok():
 
 
 async def test_snapshot_returns_data():
-    from ceki_sdk import Browser
     import base64
+
+    from ceki_sdk import Browser
 
     client = AsyncMock()
     client._active_browsers = {}

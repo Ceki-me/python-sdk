@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from ceki_sdk import Client, ConnectOptions, connect
-from ceki_sdk._captcha import CaptchaResult
+from ceki_sdk import ConnectOptions, connect
 from ceki_sdk._exceptions import CaptchaError, CaptchaTimeoutError
 
 from .conftest import MockRelayServer
@@ -57,7 +55,11 @@ async def test_request_captcha_happy_path(mock_relay: MockRelayServer) -> None:
     try:
         with _patch_httpx_post():
             captcha_task = asyncio.create_task(
-                browser.request_captcha(acceptance_timeout=30, completion_timeout=30, auto_accept=False)
+                browser.request_captcha(
+                    acceptance_timeout=30,
+                    completion_timeout=30,
+                    auto_accept=False,
+                )
             )
             await asyncio.sleep(0.1)
 
@@ -133,7 +135,11 @@ async def test_provider_declined(mock_relay: MockRelayServer) -> None:
     try:
         with _patch_httpx_post():
             captcha_task = asyncio.create_task(
-                browser.request_captcha(acceptance_timeout=30, completion_timeout=30, auto_accept=False)
+                browser.request_captcha(
+                    acceptance_timeout=30,
+                    completion_timeout=30,
+                    auto_accept=False,
+                )
             )
             await asyncio.sleep(0.1)
 
@@ -182,7 +188,11 @@ async def test_request_captcha_happy_path_auto_accept(mock_relay: MockRelayServe
         with _patch_httpx_post() as mock_http_cls:
             http_instance = mock_http_cls.return_value
             captcha_task = asyncio.create_task(
-                browser.request_captcha(acceptance_timeout=30, completion_timeout=30, auto_accept=True)
+                browser.request_captcha(
+                    acceptance_timeout=30,
+                    completion_timeout=30,
+                    auto_accept=True,
+                )
             )
             await asyncio.sleep(0.1)
 
@@ -229,7 +239,11 @@ async def test_request_captcha_manual_accept(mock_relay: MockRelayServer) -> Non
         with _patch_httpx_post() as mock_http_cls:
             http_instance = mock_http_cls.return_value
             captcha_task = asyncio.create_task(
-                browser.request_captcha(acceptance_timeout=30, completion_timeout=30, auto_accept=False)
+                browser.request_captcha(
+                    acceptance_timeout=30,
+                    completion_timeout=30,
+                    auto_accept=False,
+                )
             )
             await asyncio.sleep(0.1)
 
@@ -281,7 +295,11 @@ async def test_request_captcha_manual_reject(mock_relay: MockRelayServer) -> Non
         with _patch_httpx_post() as mock_http_cls:
             http_instance = mock_http_cls.return_value
             captcha_task = asyncio.create_task(
-                browser.request_captcha(acceptance_timeout=30, completion_timeout=30, auto_accept=False)
+                browser.request_captcha(
+                    acceptance_timeout=30,
+                    completion_timeout=30,
+                    auto_accept=False,
+                )
             )
             await asyncio.sleep(0.1)
 
@@ -332,7 +350,11 @@ async def test_request_captcha_no_correction_id_raises(mock_relay: MockRelayServ
     try:
         with _patch_httpx_post():
             captcha_task = asyncio.create_task(
-                browser.request_captcha(acceptance_timeout=30, completion_timeout=30, auto_accept=False)
+                browser.request_captcha(
+                    acceptance_timeout=30,
+                    completion_timeout=30,
+                    auto_accept=False,
+                )
             )
             await asyncio.sleep(0.1)
 

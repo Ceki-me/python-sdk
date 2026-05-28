@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 DEFAULTS: dict[str, Any] = {
     "version": 1,
     "name": "custom",
