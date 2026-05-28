@@ -54,7 +54,7 @@ async def test_upload_file_path(tmp_path: Path):
     assert result == {"ok": True, "filename": "doc.pdf", "size": 21}
 
     # Verify send was called with Runtime.evaluate
-    call_args = b.send.call_args[0][0]
+    call_args = b.send.call_args_list[0][0][0]
     assert call_args["method"] == "Runtime.evaluate"
     expr = call_args["params"]["expression"]
     assert "document.querySelector" in expr
@@ -79,7 +79,7 @@ async def test_upload_bytes_custom_filename():
     result = await b.upload("#file-input", data, filename="custom.txt")
     assert result == {"ok": True, "filename": "custom.txt", "size": 11}
 
-    call_args = b.send.call_args[0][0]
+    call_args = b.send.call_args_list[0][0][0]
     expr = call_args["params"]["expression"]
     b64 = base64.b64encode(data).decode("ascii")
     assert b64 in expr
@@ -103,7 +103,7 @@ async def test_upload_bytes_default_filename():
     result = await b.upload("input", b"\x00\x01\x02")
     assert result["filename"] == "upload.bin"
 
-    call_args = b.send.call_args[0][0]
+    call_args = b.send.call_args_list[0][0][0]
     expr = call_args["params"]["expression"]
     assert "upload.bin" in expr
     assert "application/octet-stream" in expr
@@ -128,7 +128,7 @@ async def test_upload_escapes_special_chars(tmp_path: Path):
 
     await b.upload("input", test_file, filename='file"with\'quotes.png')
 
-    call_args = b.send.call_args[0][0]
+    call_args = b.send.call_args_list[0][0][0]
     expr = call_args["params"]["expression"]
     # json.dumps properly escapes the double quote
     assert r'file\"with' in expr
@@ -198,7 +198,7 @@ async def test_upload_mime_type_png(tmp_path: Path):
     })
 
     await b.upload("input", f)
-    expr = b.send.call_args[0][0]["params"]["expression"]
+    expr = b.send.call_args_list[0][0][0]["params"]["expression"]
     assert "image/png" in expr
 
 
@@ -212,7 +212,7 @@ async def test_upload_mime_type_pdf(tmp_path: Path):
     })
 
     await b.upload("input", f)
-    expr = b.send.call_args[0][0]["params"]["expression"]
+    expr = b.send.call_args_list[0][0][0]["params"]["expression"]
     assert "application/pdf" in expr
 
 
@@ -226,7 +226,7 @@ async def test_upload_mime_type_unknown(tmp_path: Path):
     })
 
     await b.upload("input", f)
-    expr = b.send.call_args[0][0]["params"]["expression"]
+    expr = b.send.call_args_list[0][0][0]["params"]["expression"]
     assert "application/octet-stream" in expr
 
 
