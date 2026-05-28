@@ -14,11 +14,6 @@ import httpx
 
 from .humanize import Humanizer, HumanProfile
 
-mimetypes.init()
-for _ext, _mime in {".avif": "image/avif", ".webm": "video/webm", ".woff2": "font/woff2"}.items():
-    if not mimetypes.guess_type(f"x{_ext}")[0]:
-        mimetypes.add_type(_mime, _ext)
-
 if TYPE_CHECKING:
     from ._client import Client
 from ._captcha import CaptchaResult
@@ -33,6 +28,11 @@ from ._exceptions import (
 from ._models import Match, Snapshot
 
 log = logging.getLogger(__name__)
+
+mimetypes.init()
+for _ext, _mime in {".avif": "image/avif", ".webm": "video/webm", ".woff2": "font/woff2"}.items():
+    if not mimetypes.guess_type(f"x{_ext}")[0]:
+        mimetypes.add_type(_mime, _ext)
 
 EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 TabOpenedCallback = Callable[[str], Awaitable[None]]
