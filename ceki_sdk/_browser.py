@@ -14,6 +14,11 @@ import httpx
 
 from .humanize import Humanizer, HumanProfile
 
+mimetypes.init()
+for _ext, _mime in {".avif": "image/avif", ".webm": "video/webm", ".woff2": "font/woff2"}.items():
+    if not mimetypes.guess_type(f"x{_ext}")[0]:
+        mimetypes.add_type(_mime, _ext)
+
 if TYPE_CHECKING:
     from ._client import Client
 from ._captcha import CaptchaResult
@@ -320,30 +325,8 @@ class Browser:
             self._last_seen_ts = all_msgs[-1].created_at
         return Snapshot(screenshot=screenshot_b64, chat=all_msgs, ts=datetime.now(timezone.utc))
 
-    _MIME_MAP: dict[str, str] = {
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".gif": "image/gif",
-        ".webp": "image/webp",
-        ".avif": "image/avif",
-        ".svg": "image/svg+xml",
-        ".pdf": "application/pdf",
-        ".mp4": "video/mp4",
-        ".webm": "video/webm",
-        ".json": "application/json",
-        ".txt": "text/plain",
-        ".csv": "text/csv",
-        ".html": "text/html",
-        ".xml": "application/xml",
-        ".zip": "application/zip",
-    }
-
     @staticmethod
     def _detect_mime(filename: str) -> str:
-        ext = Path(filename).suffix.lower()
-        if ext in Browser._MIME_MAP:
-            return Browser._MIME_MAP[ext]
         guessed, _ = mimetypes.guess_type(filename)
         return guessed or "application/octet-stream"
 
