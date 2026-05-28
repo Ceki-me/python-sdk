@@ -19,7 +19,7 @@ async def test_two_sessions_routed_independently(mock_relay):
             await asyncio.sleep(0.05)
             rent = next(
                 (m for m in mock_relay.received
-                 if m.get("type") == "rent" and m.get("schedule_id") == schedule_id
+                 if m.get("type") == "rent" and m.get("browser_id") == schedule_id
                  and schedule_id not in acked),
                 None,
             )
