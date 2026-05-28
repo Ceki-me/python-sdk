@@ -12,7 +12,6 @@ Env vars required:
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 
 import pytest
@@ -127,7 +126,7 @@ async def test_fingerprint_persists_across_rents():
     finally:
         await client_a.close()
 
-    print(f"\n--- Session A ---")
+    print("\n--- Session A ---")
     print(f"  UA:       {a['ua']}")
     print(f"  TZ:       {a['tz']}")
     print(f"  Locale:   {a['locale']}")
@@ -137,7 +136,7 @@ async def test_fingerprint_persists_across_rents():
     if a["fp_cdp"]:
         print(f"  FP seed:  {a['fp_cdp'].get('seed')}")
     else:
-        print(f"  FP CDP:   not available (ext < 0.6.102)")
+        print("  FP CDP:   not available (ext < 0.6.102)")
 
     fingerprint_from_profile = a["profile"].get("fingerprint")
 
@@ -155,7 +154,7 @@ async def test_fingerprint_persists_across_rents():
     finally:
         await client_b.close()
 
-    print(f"\n--- Session B ---")
+    print("\n--- Session B ---")
     print(f"  UA:       {b['ua']}")
     print(f"  TZ:       {b['tz']}")
     print(f"  Locale:   {b['locale']}")
@@ -165,20 +164,33 @@ async def test_fingerprint_persists_across_rents():
     if b["fp_cdp"]:
         print(f"  FP seed:  {b['fp_cdp'].get('seed')}")
     else:
-        print(f"  FP CDP:   not available (ext < 0.6.102)")
+        print("  FP CDP:   not available (ext < 0.6.102)")
 
     # --- Assertions ---
     if fingerprint_from_profile is None:
         print("\n⚠ Extension < 0.6.102: Browser.getFingerprint not available.")
         print("  Cannot test fingerprint persistence (profile has no fingerprint).")
         print("  Update extension to 0.6.102+ and re-run.")
-        pytest.skip("Extension too old — Browser.getFingerprint not available, fingerprint not in profile")
+        pytest.skip(
+            "Extension too old — Browser.getFingerprint not available,"
+            " fingerprint not in profile"
+        )
 
-    assert a["ua"] == b["ua"], f"UA mismatch: {a['ua']!r} vs {b['ua']!r}"
-    assert a["tz"] == b["tz"], f"TZ mismatch: {a['tz']!r} vs {b['tz']!r}"
-    assert a["locale"] == b["locale"], f"Locale mismatch: {a['locale']!r} vs {b['locale']!r}"
-    assert a["screen_w"] == b["screen_w"], f"screen.width mismatch: {a['screen_w']} vs {b['screen_w']}"
-    assert a["screen_h"] == b["screen_h"], f"screen.height mismatch: {a['screen_h']} vs {b['screen_h']}"
+    assert a["ua"] == b["ua"], (
+        f"UA mismatch: {a['ua']!r} vs {b['ua']!r}"
+    )
+    assert a["tz"] == b["tz"], (
+        f"TZ mismatch: {a['tz']!r} vs {b['tz']!r}"
+    )
+    assert a["locale"] == b["locale"], (
+        f"Locale mismatch: {a['locale']!r} vs {b['locale']!r}"
+    )
+    assert a["screen_w"] == b["screen_w"], (
+        f"screen.width mismatch: {a['screen_w']} vs {b['screen_w']}"
+    )
+    assert a["screen_h"] == b["screen_h"], (
+        f"screen.height mismatch: {a['screen_h']} vs {b['screen_h']}"
+    )
     assert a["hc"] == b["hc"], f"hardwareConcurrency mismatch: {a['hc']} vs {b['hc']}"
     assert a["webgl"] == b["webgl"], f"WebGL mismatch: {a['webgl']!r} vs {b['webgl']!r}"
 

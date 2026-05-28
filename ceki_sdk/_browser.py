@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Coroutine, Literal, 
 
 import httpx
 
-from .humanize import HumanProfile, Humanizer
+from .humanize import Humanizer, HumanProfile
 
 if TYPE_CHECKING:
     from ._client import Client
@@ -189,7 +189,9 @@ class Browser:
     async def navigate(self, url: str, *, timeout: float = 30.0) -> dict:
         if self._humanizer:
             await self._humanizer.before("navigate")
-        result = await self.send({"method": "Page.navigate", "params": {"url": url}}, timeout=timeout)
+        result = await self.send(
+            {"method": "Page.navigate", "params": {"url": url}}, timeout=timeout,
+        )
         if self._humanizer:
             await self._humanizer.after("navigate")
         return result
@@ -242,7 +244,10 @@ class Browser:
             if self._last_pointer is not None:
                 await self.click(*self._last_pointer)
             else:
-                log.debug("type() called with humanizer but no last_pointer; falling back to plain insertText")
+                log.debug(
+                    "type() called with humanizer but no last_pointer;"
+                    " falling back to plain insertText"
+                )
             await self._humanizer.before("type")
             async for char, delay_ms in self._humanizer.humanize_text(text):
                 await self._send_keystroke(char)
@@ -393,7 +398,8 @@ class Browser:
             "(function() {"
             f"var input = document.querySelector({js_selector});"
             "if (!input) return JSON.stringify({error: 'no input matched'});"
-            "if (input.type !== 'file') return JSON.stringify({error: 'element is not a file input'});"
+            "if (input.type !== 'file')"
+            " return JSON.stringify({error: 'element is not a file input'});"
             f"var b64 = '{b64_data}';"
             "var bin = atob(b64);"
             "var bytes = new Uint8Array(bin.length);"
@@ -421,13 +427,19 @@ class Browser:
             raise ValueError(parsed["error"])
 
         try:
+            esc_params = {
+                "key": "Escape",
+                "code": "Escape",
+                "windowsVirtualKeyCode": 27,
+                "nativeVirtualKeyCode": 27,
+            }
             await self.send({
                 "method": "Input.dispatchKeyEvent",
-                "params": {"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27, "nativeVirtualKeyCode": 27},
+                "params": {"type": "keyDown", **esc_params},
             })
             await self.send({
                 "method": "Input.dispatchKeyEvent",
-                "params": {"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27, "nativeVirtualKeyCode": 27},
+                "params": {"type": "keyUp", **esc_params},
             })
         except Exception:
             pass

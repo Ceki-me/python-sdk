@@ -86,7 +86,12 @@ class BrowserChat:
             if mime is None:
                 mime = _detect_mime(data)
             if filename is None:
-                ext = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp'}.get(mime or '', 'bin')
+                mime_ext = {
+                    'image/png': 'png',
+                    'image/jpeg': 'jpg',
+                    'image/webp': 'webp',
+                }
+                ext = mime_ext.get(mime or '', 'bin')
                 filename = f'image-{uuid4().hex[:8]}.{ext}'
 
         if len(data) > MAX_IMAGE_BYTES:

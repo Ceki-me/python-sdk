@@ -7,7 +7,13 @@ import websockets
 import websockets.server
 
 from ceki_sdk import ConnectOptions, connect
-from ceki_sdk._exceptions import AuthFailed, CekiError, InsufficientFunds, ProviderOffline, SessionEnded
+from ceki_sdk._exceptions import (
+    AuthFailed,
+    CekiError,
+    InsufficientFunds,
+    ProviderOffline,
+    SessionEnded,
+)
 
 
 class _CloseImmediately4403:
@@ -18,7 +24,10 @@ class _CloseImmediately4403:
         self.port: int = 0
 
     @staticmethod
-    def _select_subprotocol(ws: websockets.server.WebSocketServerProtocol, subprotocols: list[str]) -> str | None:
+    def _select_subprotocol(
+        ws: websockets.server.WebSocketServerProtocol,
+        subprotocols: list[str],
+    ) -> str | None:
         for sp in subprotocols:
             if sp.startswith("bearer."):
                 return sp
@@ -51,8 +60,10 @@ async def close_4403_server():
 
 
 @pytest.mark.asyncio
-async def test_connect_bogus_token_close_4403_raises_auth_failed(close_4403_server: _CloseImmediately4403) -> None:
-    """Relay accepts WS upgrade then immediately closes 4403 → connect() raises AuthFailed within 2s."""
+async def test_connect_bogus_token_close_4403_raises_auth_failed(
+    close_4403_server: _CloseImmediately4403,
+) -> None:
+    """Relay accepts WS upgrade then immediately closes 4403."""
     url = f"ws://127.0.0.1:{close_4403_server.port}"
     with pytest.raises(AuthFailed):
         await asyncio.wait_for(connect("bad-token", ConnectOptions(relay_url=url)), timeout=2.0)

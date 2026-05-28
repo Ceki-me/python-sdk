@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
-
-import pytest
 from unittest.mock import AsyncMock
 
-from ceki_sdk._profile import BrowserProfile
+import pytest
 
+from ceki_sdk._profile import BrowserProfile
 
 SAMPLE_FINGERPRINT = {
     "seed": 123456789,
@@ -230,7 +229,12 @@ async def test_import_storage_values_serialized_as_json():
     fb.send.return_value = {}
     p = BrowserProfile(fb)
     storage = {"key": 'value with "quotes" and \\backslash'}
-    await p.import_({"schema_version": 2, "cookies": [], "localStorage": storage, "sessionStorage": {}})
+    await p.import_({
+        "schema_version": 2,
+        "cookies": [],
+        "localStorage": storage,
+        "sessionStorage": {},
+    })
     expr = fb.send.call_args_list[0].args[0]["params"]["expression"]
     assert json.dumps(storage) in expr
 

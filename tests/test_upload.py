@@ -4,7 +4,6 @@ import base64
 import json
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -12,7 +11,6 @@ import pytest
 
 from ceki_sdk._browser import Browser
 from ceki_sdk.cli import build_parser
-
 
 # ──────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -128,7 +126,7 @@ async def test_upload_escapes_special_chars(tmp_path: Path):
         }
     })
 
-    result = await b.upload("input", test_file, filename='file"with\'quotes.png')
+    await b.upload("input", test_file, filename='file"with\'quotes.png')
 
     call_args = b.send.call_args[0][0]
     expr = call_args["params"]["expression"]

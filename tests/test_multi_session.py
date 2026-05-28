@@ -9,7 +9,8 @@ from ceki_sdk import ConnectOptions, connect
 
 @pytest.mark.asyncio
 async def test_two_sessions_routed_independently(mock_relay):
-    client = await connect("test-key", ConnectOptions(relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent"))
+    url = f"ws://127.0.0.1:{mock_relay.port}/ws/agent"
+    client = await connect("test-key", ConnectOptions(relay_url=url))
     acked: set[str] = set()
 
     async def ack_rent(session_id: str, schedule_id: int) -> None:
@@ -25,7 +26,11 @@ async def test_two_sessions_routed_independently(mock_relay):
             if rent:
                 acked.add(schedule_id)
                 ev_id = f"ev-{session_id}"
-                await mock_relay.send_to_all({"type": "rent_pending", "event_id": ev_id, "schedule_id": schedule_id})
+                await mock_relay.send_to_all({
+                    "type": "rent_pending",
+                    "event_id": ev_id,
+                    "schedule_id": schedule_id,
+                })
                 await asyncio.sleep(0.02)
                 await mock_relay.send_to_all({
                     "type": "match",
@@ -87,12 +92,17 @@ async def test_two_sessions_routed_independently(mock_relay):
 
 @pytest.mark.asyncio
 async def test_close_one_session_leaves_other_alive(mock_relay):
-    client = await connect("test-key", ConnectOptions(relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent"))
+    url = f"ws://127.0.0.1:{mock_relay.port}/ws/agent"
+    client = await connect("test-key", ConnectOptions(relay_url=url))
 
     async def ack_rent(session_id):
         await asyncio.sleep(0.05)
         ev_id = f"ev-{session_id}"
-        await mock_relay.send_to_all({"type": "rent_pending", "event_id": ev_id, "schedule_id": 1})
+        await mock_relay.send_to_all({
+            "type": "rent_pending",
+            "event_id": ev_id,
+            "schedule_id": 1,
+        })
         await asyncio.sleep(0.02)
         await mock_relay.send_to_all({
             "type": "match",

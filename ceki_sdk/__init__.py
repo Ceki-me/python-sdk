@@ -2,7 +2,6 @@ from ._browser import Browser
 from ._captcha import CaptchaResult
 from ._client import Client
 from ._connect import ConnectOptions, connect
-from ._profile import BrowserProfile
 from ._exceptions import (
     AuthFailed,
     CaptchaError,
@@ -19,6 +18,7 @@ from ._exceptions import (
     SessionNotFound,
 )
 from ._models import BrowserOption, ChatMessage, Match, ReadReceipt, SessionInfo, Snapshot
+from ._profile import BrowserProfile
 from .humanize import HumanProfile
 
 __version__ = "2.15.1"
