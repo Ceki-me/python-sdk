@@ -12,7 +12,7 @@ MOCK_SESSIONS_RESPONSE = {
     "data": [
         {
             "id": 2650,
-            "browser_id": 703,
+            "schedule_id": 703,
             "started_at": "2026-05-18T10:43:09Z",
             "ended_at": None,
             "status": "active",
@@ -25,7 +25,7 @@ MOCK_SESSIONS_RESPONSE = {
         },
         {
             "id": 2651,
-            "browser_id": 704,
+            "schedule_id": 704,
             "started_at": "2026-05-18T11:00:00Z",
             "ended_at": None,
             "status": "active",
@@ -64,7 +64,7 @@ async def test_list_sessions_active_only(mock_relay: MockRelayServer) -> None:
         assert len(results) == 2
         assert all(isinstance(r, SessionInfo) for r in results)
         assert results[0].id == 2650
-        assert results[0].browser_id == 703
+        assert results[0].schedule_id == 703
         assert results[0].status == "active"
         assert results[0].renter["name"] == "First"
 

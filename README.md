@@ -18,7 +18,7 @@ from ceki_sdk import connect, ConnectOptions
 async def main():
     client = await connect(os.environ["CEKI_API_KEY"])
     options = await client.search({"geo": "US", "language": "en"})
-    browser = await client.rent(options[0].browser_id)
+    browser = await client.rent(options[0].schedule_id)
     # ... CDP calls (see docs)
     await browser.close()
     await client.close()
@@ -50,9 +50,9 @@ Establish a WebSocket connection to the relay. Returns a `Client` instance.
 
 Search for available browsers. Filters: `geo`, `language`, etc.
 
-### `client.rent(browser_id) -> Browser`
+### `client.rent(schedule_id) -> Browser`
 
-Rent a browser by browser ID. Waits up to 60s for a match.
+Rent a browser by schedule ID. Waits up to 60s for a match.
 
 ### `client.close()`
 
@@ -77,7 +77,7 @@ Close all sessions and the connection.
 import json
 
 # First session — sign up, then export profile
-async with await client.rent(browser_id) as browser:
+async with await client.rent(schedule_id) as browser:
     await browser.send({"method": "Page.navigate", "params": {"url": "https://reddit.com/login"}})
     # ... perform signup, 2FA ...
     profile = await browser.profile.export(domains=[".reddit.com", "reddit.com"])
@@ -89,7 +89,7 @@ with open("reddit_profile.json", "w") as f:
 with open("reddit_profile.json") as f:
     profile = json.load(f)
 
-async with await client.rent(browser_id) as browser:
+async with await client.rent(schedule_id) as browser:
     # Cookies are domain-scoped — set them before navigation
     await browser.profile.import_(profile)
     await browser.send({"method": "Page.navigate", "params": {"url": "https://reddit.com"}})
@@ -115,7 +115,7 @@ Quick:
 ```bash
 pip install -e ".[dev]"
 export CEKI_API_KEY=...
-export BROWSER_ID=...
+export SCHEDULE_ID=...
 python examples/reddit_signup.py
 ```
 
@@ -127,16 +127,16 @@ Browser actions can optionally include human-like timing — delays before/after
 
 ```python
 # Default: natural profile (enabled by default)
-browser = await client.rent(browser_id)
+browser = await client.rent(schedule_id)
 
 # Explicit profile
-browser = await client.rent(browser_id, human="careful")
+browser = await client.rent(schedule_id, human="careful")
 
 # Disable humanization
-browser = await client.rent(browser_id, human=None)
+browser = await client.rent(schedule_id, human=None)
 
 # Custom profile dict
-browser = await client.rent(browser_id, human={"typing": {"wpm": 130}})
+browser = await client.rent(schedule_id, human={"typing": {"wpm": 130}})
 ```
 
 ### High-level methods
@@ -183,8 +183,8 @@ pip install ceki-sdk
 ```bash
 export CEKI_API_KEY=ag_...
 
-BROWSER=$(ceki search --limit 1 | jq -r '.[0].browser_id')
-SID=$(ceki rent --browser $BROWSER | jq -r .session_id)
+SCHEDULE=$(ceki search --limit 1 | jq -r '.[0].schedule_id')
+SID=$(ceki rent --schedule $SCHEDULE | jq -r .session_id)
 ceki navigate $SID https://example.com
 ceki snapshot $SID -o snap.png
 ceki stop $SID
@@ -200,7 +200,7 @@ The CLI persists session state locally — after `rent` it saves the session ID 
 |---|---|
 | `search [--limit N] [--filter K=V]…` | List available browsers |
 | `my-browsers` | List browsers with pre-arranged rent contracts |
-| `rent --browser ID [--mode incognito\|main] [--fingerprint-from FILE]` | Rent a browser |
+| `rent --schedule ID [--mode incognito\|main] [--fingerprint-from FILE]` | Rent a browser |
 | `sessions [--all] [--limit N] [--json]` | List your sessions |
 | `stop SID` | End a session |
 | `wait SID` | Block until the session ends |

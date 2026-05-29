@@ -4,7 +4,7 @@ Lifecycle integration tests against a live provider. Not for CI — requires a r
 
 ## Prerequisites
 
-- Provider online with known `BROWSER_ID` on dev relay
+- Provider online with known `SCHEDULE_ID` on dev relay
 - Agent token with `browser:relay` ability and positive balance
 - `ceki-sdk` installed (`pip install -e .` from repo root)
 - Extension v0.6.74+ on provider Chrome
@@ -15,7 +15,7 @@ Lifecycle integration tests against a live provider. Not for CI — requires a r
 export CEKI_TOKEN="385|<sanctum-token>"
 export CEKI_API_URL="https://api.ceki.me"
 export CEKI_RELAY_URL="wss://browser.ceki.me/ws/agent"
-export BROWSER_ID=240                                    # default
+export SCHEDULE_ID=240                                    # default
 ```
 
 Optional (scenario H only):
@@ -31,7 +31,7 @@ export CEKI_TOKEN_NO_FUNDS="<token-of-zero-balance-user>"
 |----|------|--------------|
 | A  | Happy path | connect → rent → Page.navigate → title check → screenshot → close |
 | B  | Auto-accept | Same as A (requires provider auto-accept enabled) |
-| D  | Offer timeout | Rent with nonexistent browser — expects ProviderOffline/CekiError |
+| D  | Offer timeout | Rent with nonexistent schedule — expects ProviderOffline/CekiError |
 | H  | Insufficient funds | Rent with zero-balance token — expects InsufficientFunds (needs CEKI_TOKEN_NO_FUNDS) |
 | I  | 10 sequential commands | 10x Runtime.evaluate in sequence |
 | J  | Long navigation | Page.navigate to httpbin.org/delay/5, wait for loadEventFired |

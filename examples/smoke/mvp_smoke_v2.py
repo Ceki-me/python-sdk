@@ -12,7 +12,7 @@ Environment variables:
     CEKI_TOKEN          Sanctum token (e.g. 385|xxx)
     CEKI_API_URL        REST API base (default: https://clawapi.ittribe.org)
     CEKI_RELAY_URL      WS relay (default: wss://browser.ittribe.org/ws/agent)
-    BROWSER_ID         Provider browser id (default: 240)
+    SCHEDULE_ID         Provider schedule id (default: 240)
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ from ceki_sdk._exceptions import ProviderOffline
 TOKEN = os.environ.get("CEKI_TOKEN", "")
 API_URL = os.environ.get("CEKI_API_URL", "https://clawapi.ittribe.org")
 RELAY_URL = os.environ.get("CEKI_RELAY_URL", "wss://browser.ittribe.org/ws/agent")
-BROWSER_ID = int(os.environ.get("BROWSER_ID", "240"))
+SCHEDULE_ID = int(os.environ.get("SCHEDULE_ID", "240"))
 
 # ── Step reporting ──────────────────────────────────────────────────────────
 
@@ -111,7 +111,7 @@ async def scenario_a() -> int:
     try:
         step_ok("connect", f"relay={RELAY_URL}")
 
-        browser = await client.rent(BROWSER_ID)
+        browser = await client.rent(SCHEDULE_ID)
         step_ok("rent", f"session={browser.session_id}")
 
         # First navigate creates the incognito window on the provider side;
@@ -174,7 +174,7 @@ async def scenario_c() -> int:
         step_ok("connect")
         print("  >>> Decline the offer in the provider plugin within 30s <<<")
         try:
-            await client.rent(BROWSER_ID)
+            await client.rent(SCHEDULE_ID)
             step_fail("rent", "expected exception on decline, got Browser")
         except CekiError as exc:
             step_ok("rent_declined", f"{type(exc).__name__}: {exc}")
@@ -194,10 +194,10 @@ async def scenario_d() -> int:
     client = await make_client()
     try:
         step_ok("connect")
-        fake_browser = 999999
+        fake_schedule = 999999
         try:
-            await client.rent(fake_browser)
-            step_fail("rent", "expected error for nonexistent browser, got Browser")
+            await client.rent(fake_schedule)
+            step_fail("rent", "expected error for nonexistent schedule, got Browser")
         except (ProviderOffline, ProviderDisconnected, CekiError) as exc:
             step_ok("rent_error", f"{type(exc).__name__}: {exc}")
     except Exception as exc:
@@ -216,7 +216,7 @@ async def scenario_e() -> int:
     client = await make_client()
     try:
         step_ok("connect")
-        browser = await client.rent(BROWSER_ID)
+        browser = await client.rent(SCHEDULE_ID)
         step_ok("rent", f"session={browser.session_id}")
         await browser.send({"method": "Page.navigate", "params": {"url": "https://example.com"}})
         await browser.send({"method": "Page.enable"})
@@ -245,7 +245,7 @@ async def scenario_f() -> int:
     client = await make_client()
     try:
         step_ok("connect")
-        browser = await client.rent(BROWSER_ID)
+        browser = await client.rent(SCHEDULE_ID)
         step_ok("rent", f"session={browser.session_id}")
         await browser.send({"method": "Page.navigate", "params": {"url": "https://example.com"}})
         await browser.send({"method": "Page.enable"})
@@ -297,7 +297,7 @@ async def scenario_g() -> int:
     client = await make_client()
     try:
         step_ok("connect")
-        browser = await client.rent(BROWSER_ID)
+        browser = await client.rent(SCHEDULE_ID)
         step_ok("rent", f"session={browser.session_id}")
         await browser.send({"method": "Page.navigate", "params": {"url": "https://example.com"}})
         await browser.send({"method": "Page.enable"})
@@ -332,7 +332,7 @@ async def scenario_h() -> int:
     try:
         step_ok("connect")
         try:
-            await client.rent(BROWSER_ID)
+            await client.rent(SCHEDULE_ID)
             step_fail("rent", "expected InsufficientFunds, got Browser")
         except InsufficientFunds as exc:
             step_ok("insufficient_funds", str(exc))
@@ -354,7 +354,7 @@ async def scenario_i() -> int:
     client = await make_client()
     try:
         step_ok("connect")
-        browser = await client.rent(BROWSER_ID)
+        browser = await client.rent(SCHEDULE_ID)
         step_ok("rent", f"session={browser.session_id}")
 
         await browser.send({"method": "Page.navigate", "params": {"url": "about:blank"}})
@@ -388,7 +388,7 @@ async def scenario_j() -> int:
     client = await make_client()
     try:
         step_ok("connect")
-        browser = await client.rent(BROWSER_ID)
+        browser = await client.rent(SCHEDULE_ID)
         step_ok("rent", f"session={browser.session_id}")
 
         await browser.send({"method": "Page.navigate", "params": {"url": "about:blank"}})

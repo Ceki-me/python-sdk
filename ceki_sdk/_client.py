@@ -171,7 +171,7 @@ class Client:
 
     async def rent(
         self,
-        browser_id: int,
+        schedule_id: int,
         *,
         mode: str = "incognito",
         human="natural",
@@ -182,7 +182,7 @@ class Client:
             raise ValueError(f"mode must be 'incognito' or 'main', got {mode!r}")
         fut: asyncio.Future[Match] = asyncio.get_event_loop().create_future()
         self._pending_rent_queue.append(fut)
-        msg: dict = {"type": "rent", "browser_id": browser_id}
+        msg: dict = {"type": "rent", "browser_id": schedule_id}
         if mode != "incognito":
             msg["mode"] = mode
         await self._ws_send(msg)

@@ -19,11 +19,11 @@ async def test_rent_resolves_via_rent_pending_then_match(mock_relay: MockRelaySe
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
-    rent_task = asyncio.create_task(client.rent(browser_id=240))
+    rent_task = asyncio.create_task(client.rent(schedule_id=240))
     await asyncio.sleep(0.05)
 
     # Relay sends rent_pending with server-assigned event_id
-    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "1924", "browser_id": 240})
+    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "1924", "schedule_id": 240})
     await asyncio.sleep(0.05)
 
     # Relay sends match with same event_id
@@ -31,16 +31,16 @@ async def test_rent_resolves_via_rent_pending_then_match(mock_relay: MockRelaySe
         "type": "match",
         "event_id": "1924",
         "session_id": "1924",
-        "browser_id": 240,
+        "schedule_id": 240,
         "capabilities": {},
         "price_per_min": 0.01,
     })
 
     browser = await asyncio.wait_for(rent_task, timeout=5)
     assert browser.session_id == "1924"
-    assert browser.browser_id == 240
+    assert browser.schedule_id == 240
 
-    # Verify WS rent message had only type + browser_id (no event_id, no duration_minutes)
+    # Verify WS rent message had only type + schedule_id (no event_id, no duration_minutes)
     rent_msgs = [m for m in mock_relay.received if m.get("type") == "rent"]
     assert len(rent_msgs) == 1
     assert set(rent_msgs[0].keys()) == {"type", "browser_id"}
@@ -54,10 +54,10 @@ async def test_rent_error_with_event_id_raises_exception(mock_relay: MockRelaySe
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
-    rent_task = asyncio.create_task(client.rent(browser_id=240))
+    rent_task = asyncio.create_task(client.rent(schedule_id=240))
     await asyncio.sleep(0.05)
 
-    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "777", "browser_id": 240})
+    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "777", "schedule_id": 240})
     await asyncio.sleep(0.05)
 
     await mock_relay.send_to_all({
@@ -81,7 +81,7 @@ async def test_rent_early_error_without_event_id_raises_exception(
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
-    rent_task = asyncio.create_task(client.rent(browser_id=240))
+    rent_task = asyncio.create_task(client.rent(schedule_id=240))
     await asyncio.sleep(0.05)
 
     # Early error before rent_pending (e.g. rate limit) — no event_id
@@ -102,16 +102,16 @@ async def test_rent_with_fingerprint_dict_sends_configure(mock_relay: MockRelayS
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
-    rent_task = asyncio.create_task(client.rent(browser_id=240, fingerprint=SAMPLE_FINGERPRINT))
+    rent_task = asyncio.create_task(client.rent(schedule_id=240, fingerprint=SAMPLE_FINGERPRINT))
     await asyncio.sleep(0.05)
 
-    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "fp1", "browser_id": 240})
+    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "fp1", "schedule_id": 240})
     await asyncio.sleep(0.05)
     await mock_relay.send_to_all({
         "type": "match",
         "event_id": "fp1",
         "session_id": "fp1",
-        "browser_id": 240,
+        "schedule_id": 240,
         "capabilities": {},
         "price_per_min": 0.01,
     })
@@ -135,16 +135,16 @@ async def test_rent_with_fingerprint_false_sends_configure_false(
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
-    rent_task = asyncio.create_task(client.rent(browser_id=240, fingerprint=False))
+    rent_task = asyncio.create_task(client.rent(schedule_id=240, fingerprint=False))
     await asyncio.sleep(0.05)
 
-    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "fp2", "browser_id": 240})
+    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "fp2", "schedule_id": 240})
     await asyncio.sleep(0.05)
     await mock_relay.send_to_all({
         "type": "match",
         "event_id": "fp2",
         "session_id": "fp2",
-        "browser_id": 240,
+        "schedule_id": 240,
         "capabilities": {},
         "price_per_min": 0.01,
     })
@@ -164,16 +164,16 @@ async def test_rent_with_fingerprint_true_no_configure(mock_relay: MockRelayServ
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
-    rent_task = asyncio.create_task(client.rent(browser_id=240, fingerprint=True))
+    rent_task = asyncio.create_task(client.rent(schedule_id=240, fingerprint=True))
     await asyncio.sleep(0.05)
 
-    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "fp3", "browser_id": 240})
+    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "fp3", "schedule_id": 240})
     await asyncio.sleep(0.05)
     await mock_relay.send_to_all({
         "type": "match",
         "event_id": "fp3",
         "session_id": "fp3",
-        "browser_id": 240,
+        "schedule_id": 240,
         "capabilities": {},
         "price_per_min": 0.01,
     })

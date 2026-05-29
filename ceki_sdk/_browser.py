@@ -95,7 +95,11 @@ class Browser:
 
     @property
     def browser_id(self) -> int:
-        return self._match.browser_id
+        return self._match.schedule_id
+
+    @property
+    def schedule_id(self) -> int:
+        return self._match.schedule_id
 
     @property
     def chat_topic_id(self) -> str | None:

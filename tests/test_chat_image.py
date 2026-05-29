@@ -26,7 +26,7 @@ async def chat_browser(mock_relay, tmp_path):
             "type": "match",
             "event_id": server_ev,
             "session_id": "sess-img",
-            "browser_id": 1,
+            "schedule_id": 1,
             "chat_topic_id": "88",
             "browser_info": {},
         })

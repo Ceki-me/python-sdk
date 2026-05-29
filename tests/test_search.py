@@ -29,7 +29,7 @@ def _make_client(relay_url: str = "wss://relay.ceki.me/ws/agent") -> Client:
 @pytest.mark.asyncio
 async def test_search_returns_browser_options(mock_relay: MockRelayServer) -> None:
     sample = {
-        "browser_id": 1,
+        "schedule_id": 1,
         "geo": "US",
         "languages": ["en"],
         "price_per_min": 0.05,
@@ -100,7 +100,7 @@ async def test_search_bearer_auth_header(mock_relay: MockRelayServer) -> None:
 
 def test_browser_option_laravel_response() -> None:
     raw = {
-        "browser_id": 42,
+        "schedule_id": 42,
         "geo": None,
         "language": "en",
         "skills": ["form-fill"],
@@ -110,7 +110,7 @@ def test_browser_option_laravel_response() -> None:
         "rating": 4.5,
     }
     opt = BrowserOption.model_validate(raw)
-    assert opt.browser_id == 42
+    assert opt.schedule_id == 42
     assert opt.geo is None
     assert opt.language == "en"
     assert opt.currency == "USD"
@@ -119,12 +119,12 @@ def test_browser_option_laravel_response() -> None:
 
 def test_browser_option_ignores_extra_fields() -> None:
     raw = {
-        "browser_id": 1,
+        "schedule_id": 1,
         "price_per_min": 0.05,
         "unknown_field": "ignored",
     }
     opt = BrowserOption.model_validate(raw)
-    assert opt.browser_id == 1
+    assert opt.schedule_id == 1
 
 
 @pytest.mark.asyncio

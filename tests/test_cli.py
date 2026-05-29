@@ -24,7 +24,7 @@ from ceki_sdk.cli import build_parser
 
 def test_state_save_load_delete(tmp_path: Path):
     with patch("ceki_sdk._state._STATE_DIR", tmp_path / "sessions"):
-        save_session("test-1", {"session_id": "test-1", "browser_id": 5})
+        save_session("test-1", {"session_id": "test-1", "schedule_id": 5})
         data = load_session("test-1")
         assert data is not None
         assert data["session_id"] == "test-1"
@@ -50,9 +50,9 @@ def test_state_last_seen_ts(tmp_path: Path):
 
 def test_parser_rent():
     parser = build_parser()
-    args = parser.parse_args(["rent", "--browser", "42"])
+    args = parser.parse_args(["rent", "--schedule", "42"])
     assert args.command == "rent"
-    assert args.browser == 42
+    assert args.schedule == 42
 
 
 def test_parser_snapshot():
@@ -306,7 +306,7 @@ def test_search_filter_parsing():
 def test_missing_api_key_exits_2():
     env = {k: v for k, v in __import__("os").environ.items() if k != "CEKI_API_KEY"}
     result = subprocess.run(
-        [sys.executable, "-m", "ceki_sdk.cli", "rent", "--browser", "1"],
+        [sys.executable, "-m", "ceki_sdk.cli", "rent", "--schedule", "1"],
         capture_output=True,
         text=True,
         env=env,
@@ -393,13 +393,13 @@ async def test_resume_ok():
         await client._dispatch({
             "type": "resume_ok",
             "session_id": "s3",
-            "browser_id": 42,
+            "schedule_id": 42,
             "chat_topic_id": "topic-1",
             "provider_user_id": 99,
         })
         browser = await task
     assert browser.session_id == "s3"
-    assert browser.browser_id == 42
+    assert browser.schedule_id == 42
     assert browser.chat_topic_id == "topic-1"
     assert "s3" in client._active_browsers
 
@@ -421,7 +421,7 @@ async def test_snapshot_returns_data():
 
     match = AsyncMock()
     match.session_id = "snap-1"
-    match.browser_id = 1
+    match.schedule_id = 1
     match.chat_topic_id = "t1"
     match.browser_info = {}
     match.provider_user_id = None

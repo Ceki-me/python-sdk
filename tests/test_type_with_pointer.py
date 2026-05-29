@@ -14,7 +14,7 @@ def browser_humanized():
 
     match = AsyncMock()
     match.session_id = "test-session"
-    match.browser_id = 1
+    match.schedule_id = 1
     match.chat_topic_id = None
     match.browser_info = {}
     match.provider_user_id = None
@@ -30,7 +30,7 @@ def browser_no_human():
 
     match = AsyncMock()
     match.session_id = "test-session"
-    match.browser_id = 1
+    match.schedule_id = 1
     match.chat_topic_id = None
     match.browser_info = {}
     match.provider_user_id = None

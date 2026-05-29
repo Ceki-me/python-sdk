@@ -17,14 +17,14 @@ async def browser_fixture(mock_relay):
         await mock_relay.send_to_all({
             "type": "rent_pending",
             "event_id": "ev-tab",
-            "browser_id": 1,
+            "schedule_id": 1,
         })
         await asyncio.sleep(0.02)
         await mock_relay.send_to_all({
             "type": "match",
             "event_id": "ev-tab",
             "session_id": "sess-tab",
-            "browser_id": 1,
+            "schedule_id": 1,
             "chat_topic_id": None,
             "browser_info": {},
         })

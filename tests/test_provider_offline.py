@@ -18,11 +18,11 @@ async def test_rent_error_provider_offline_raises_provider_offline(
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
-    rent_task = asyncio.create_task(client.rent(browser_id=55))
+    rent_task = asyncio.create_task(client.rent(schedule_id=55))
     await asyncio.sleep(0.05)
 
     # Relay sends rent_pending (moves fut to _pending_rents)
-    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "555", "browser_id": 55})
+    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "555", "schedule_id": 55})
     await asyncio.sleep(0.05)
 
     # Relay sends rent.error provider_offline (with event_id, as relay does after probe timeout)
@@ -47,7 +47,7 @@ async def test_rent_error_provider_offline_without_event_id(
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
-    rent_task = asyncio.create_task(client.rent(browser_id=55))
+    rent_task = asyncio.create_task(client.rent(schedule_id=55))
     await asyncio.sleep(0.05)
 
     # rent.error arrives before rent_pending (fut still in queue)
