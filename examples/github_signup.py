@@ -9,7 +9,7 @@ Run:
   python examples/github_signup.py
 
 Discovers an online provider via `client.search()` and rents the first one.
-Optional `SCHEDULE_ID=N` env pins a specific provider (skip discovery).
+Optional `BROWSER_ID=N` env pins a specific provider (skip discovery).
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def _random_password(length: int = 16) -> str:
 async def main() -> None:
     api_key = os.environ["CEKI_API_KEY"]
     relay_url = os.environ.get("CEKI_RELAY_URL", "wss://relay.ittribe.org/ws/agent")
-    pinned_schedule_id = os.environ.get("SCHEDULE_ID")
+    pinned_browser_id = os.environ.get("BROWSER_ID")
     email_tag = os.environ.get("EMAIL_TAG", f"browserlend-{secrets.token_hex(4)}")
     email_base = os.environ.get("EMAIL_BASE", "kom@ceki.me")
     local, _, domain = email_base.partition("@")
@@ -46,19 +46,19 @@ async def main() -> None:
 
     client = await connect(api_key, ConnectOptions(relay_url=relay_url))
 
-    if pinned_schedule_id is not None:
-        schedule_id = int(pinned_schedule_id)
-        print(f"[search] using pinned SCHEDULE_ID={schedule_id}")
+    if pinned_browser_id is not None:
+        browser_id = int(pinned_browser_id)
+        print(f"[search] using pinned BROWSER_ID={browser_id}")
     else:
         options = await client.search({})
         if not options:
             print("[search] no online providers — try later")
             await client.close()
             return
-        schedule_id = options[0].schedule_id
-        print(f"[search] found {len(options)} provider(s), renting schedule_id={schedule_id}")
+        browser_id = options[0].browser_id
+        print(f"[search] found {len(options)} provider(s), renting browser_id={browser_id}")
 
-    browser = await client.rent(schedule_id)
+    browser = await client.rent(browser_id)
     print(f"[session] id={browser.session_id} chat_topic_id={browser.chat_topic_id}")
     print(f"[session] browser_info={browser.browser_info}")
 

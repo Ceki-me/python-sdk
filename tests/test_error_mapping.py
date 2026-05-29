@@ -75,7 +75,7 @@ async def test_handle_error_minus_1015_raises_provider_offline(mock_relay) -> No
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
-    rent_task = asyncio.create_task(client.rent(schedule_id=99))
+    rent_task = asyncio.create_task(client.rent(browser_id=99))
     await asyncio.sleep(0.05)
 
     await mock_relay.send_to_all({"type": "error", "code": -1015, "reason": "no_providers"})
@@ -94,7 +94,7 @@ async def test_error_message_uses_reason_field(mock_relay) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
-    rent_task = asyncio.create_task(client.rent(schedule_id=77))
+    rent_task = asyncio.create_task(client.rent(browser_id=77))
     await asyncio.sleep(0.05)
 
     # error with reason field only (no message), no session_id → goes to _handle_error
@@ -118,7 +118,7 @@ async def test_handle_error_minus_1014_raises_ceki_error(mock_relay) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
-    rent_task = asyncio.create_task(client.rent(schedule_id=99))
+    rent_task = asyncio.create_task(client.rent(browser_id=99))
     await asyncio.sleep(0.05)
 
     await mock_relay.send_to_all({
@@ -139,7 +139,7 @@ async def test_handle_error_minus_1012_raises_insufficient_funds(mock_relay) -> 
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
-    rent_task = asyncio.create_task(client.rent(schedule_id=88))
+    rent_task = asyncio.create_task(client.rent(browser_id=88))
     await asyncio.sleep(0.05)
 
     await mock_relay.send_to_all({
@@ -160,7 +160,7 @@ async def test_handle_error_unknown_code_raises_ceki_error(mock_relay) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
-    rent_task = asyncio.create_task(client.rent(schedule_id=77))
+    rent_task = asyncio.create_task(client.rent(browser_id=77))
     await asyncio.sleep(0.05)
 
     await mock_relay.send_to_all({

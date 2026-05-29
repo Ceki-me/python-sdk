@@ -29,7 +29,7 @@ async def chat_browser(mock_relay):
             "type": "match",
             "event_id": server_ev,
             "session_id": "sess-hist",
-            "schedule_id": 1,
+            "browser_id": 1,
             "chat_topic_id": "55",
             "browser_info": {},
         })
@@ -121,7 +121,7 @@ async def test_history_no_topic_returns_empty(mock_relay):
             "type": "match",
             "event_id": server_ev,
             "session_id": "sess-notopic",
-            "schedule_id": 1,
+            "browser_id": 1,
             "chat_topic_id": None,
             "browser_info": {},
         })

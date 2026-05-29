@@ -12,7 +12,7 @@ async def main() -> None:
     options = await client.search({"geo": "US"}, limit=5)
     print(f"Found {len(options)} browser(s)")
     for opt in options:
-        print(f"  schedule_id={opt.schedule_id} geo={opt.geo} price={opt.price_per_min}/min")
+        print(f"  browser_id={opt.browser_id} geo={opt.geo} price={opt.price_per_min}/min")
 
     await client.close()
     print("Done")

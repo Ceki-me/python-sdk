@@ -9,7 +9,7 @@ from ceki_sdk import connect
 
 async def main() -> None:
     client = await connect(os.environ["CEKI_API_KEY"])
-    browser = await client.rent(int(os.environ["SCHEDULE_ID"]))
+    browser = await client.rent(int(os.environ["BROWSER_ID"]))
 
     provider_replied = asyncio.Event()
     provider_text: dict[str, str] = {}

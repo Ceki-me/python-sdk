@@ -70,17 +70,17 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
         fp_data = profile.get("fingerprint") or True
     client = await connect(api_key, _connect_options())
     try:
-        browser = await client.rent(args.schedule, mode=args.mode, fingerprint=fp_data)
+        browser = await client.rent(args.browser, mode=args.mode, fingerprint=fp_data)
         save_session(browser.session_id, {
             "session_id": browser.session_id,
             "chat_topic_id": browser.chat_topic_id,
-            "schedule_id": browser.schedule_id,
+            "browser_id": browser.browser_id,
             "last_seen_ts": None,
         })
         _out({
             "session_id": browser.session_id,
             "chat_topic_id": browser.chat_topic_id,
-            "schedule_id": browser.schedule_id,
+            "browser_id": browser.browser_id,
         })
     finally:
         if client._ws:
@@ -264,7 +264,7 @@ async def _cmd_sessions(args: argparse.Namespace) -> None:
                 print("No sessions found.")
                 return
             header = (
-                f"{'SID':<8}{'SCHEDULE':<10}{'STARTED':<22}"
+                f"{'SID':<8}{'BROWSER':<10}{'STARTED':<22}"
                 f"{'DURATION':<10}{'EARNED':<9}{'STATUS':<10}"
                 f"{'RENTER':<16}{'PROVIDER'}"
             )
@@ -276,7 +276,7 @@ async def _cmd_sessions(args: argparse.Namespace) -> None:
                 earned = f"${s.earned:.2f}"
                 renter = s.renter.get("name", "—") if s.renter else "—"
                 provider = s.provider.get("name", "—") if s.provider else "—"
-                print(f"{s.id:<8}{s.schedule_id:<10}{started:<22}{dur:<10}{earned:<9}{s.status:<10}{renter:<16}{provider}")
+                print(f"{s.id:<8}{s.browser_id:<10}{started:<22}{dur:<10}{earned:<9}{s.status:<10}{renter:<16}{provider}")
     finally:
         if client._ws:
             await client.disconnect()
@@ -424,7 +424,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_rent = sub.add_parser("rent", help="Rent a browser")
-    p_rent.add_argument("--schedule", type=int, required=True, help="Schedule ID")
+    p_rent.add_argument("--browser", type=int, required=True, help="Browser ID")
     p_rent.add_argument(
         "--mode", choices=["incognito", "main"],
         default="incognito", help="Profile mode (default: incognito)",

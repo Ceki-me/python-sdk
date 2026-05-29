@@ -16,7 +16,7 @@ def _make_browser():
 
     match = AsyncMock()
     match.session_id = "persist-1"
-    match.schedule_id = 1
+    match.browser_id = 1
     match.chat_topic_id = "t1"
     match.browser_info = {}
     match.provider_user_id = None
@@ -43,7 +43,7 @@ async def test_snapshot_filters_old_messages_client_side(tmp_path: Path):
     chat.history returns them (simulating server ignoring 'since' param)."""
     with patch("ceki_sdk._state._STATE_DIR", tmp_path / "sessions"):
         sid = "persist-1"
-        save_session(sid, {"session_id": sid, "schedule_id": 1, "last_seen_ts": None})
+        save_session(sid, {"session_id": sid, "browser_id": 1, "last_seen_ts": None})
 
         msg1 = _make_chat_msg("m1", "hello", "2026-01-01T00:00:01Z")
         msg2 = _make_chat_msg("m2", "world", "2026-01-01T00:00:02Z")

@@ -14,7 +14,7 @@ async def main() -> None:
         await client.close()
         return
 
-    browser = await client.rent(browsers[0].schedule_id)
+    browser = await client.rent(browsers[0].browser_id)
 
     load_fired = asyncio.Event()
 

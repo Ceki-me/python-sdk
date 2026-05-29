@@ -18,14 +18,14 @@ async def chat_browser(mock_relay):
         await mock_relay.send_to_all({
             "type": "rent_pending",
             "event_id": "ev-chat",
-            "schedule_id": 1,
+            "browser_id": 1,
         })
         await asyncio.sleep(0.02)
         await mock_relay.send_to_all({
             "type": "match",
             "event_id": "ev-chat",
             "session_id": "sess-chat",
-            "schedule_id": 1,
+            "browser_id": 1,
             "chat_topic_id": "77",
             "browser_info": {},
         })
@@ -47,14 +47,14 @@ async def chat_browser_no_topic(mock_relay):
         await mock_relay.send_to_all({
             "type": "rent_pending",
             "event_id": "ev-notopic",
-            "schedule_id": 1,
+            "browser_id": 1,
         })
         await asyncio.sleep(0.02)
         await mock_relay.send_to_all({
             "type": "match",
             "event_id": "ev-notopic",
             "session_id": "sess-notopic",
-            "schedule_id": 1,
+            "browser_id": 1,
             "chat_topic_id": None,
             "browser_info": {},
         })
@@ -238,7 +238,7 @@ def test_match_provider_user_id():
     from ceki_sdk._models import Match
     m = Match.model_validate({
         "session_id": "sess-1",
-        "schedule_id": 240,
+        "browser_id": 240,
         "event_id": "ev-1",
         "chat_topic_id": "69fcbb000000000000000002",
         "provider_user_id": 3,
@@ -251,6 +251,6 @@ def test_match_provider_user_id_missing():
     from ceki_sdk._models import Match
     m = Match.model_validate({
         "session_id": "sess-2",
-        "schedule_id": 240,
+        "browser_id": 240,
     })
     assert m.provider_user_id is None

@@ -25,7 +25,7 @@ def _make_browser() -> Browser:
 
     match = AsyncMock()
     match.session_id = "upload-1"
-    match.schedule_id = 1
+    match.browser_id = 1
     match.chat_topic_id = "t1"
     match.browser_info = {}
     match.provider_user_id = None

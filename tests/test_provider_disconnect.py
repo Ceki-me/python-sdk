@@ -18,7 +18,7 @@ async def _make_browser(mock_relay, session_id: str = "sess-pd"):
             "type": "match",
             "event_id": "ev-1",
             "session_id": session_id,
-            "schedule_id": 1,
+            "browser_id": 1,
             "chat_topic_id": None,
             "browser_info": {},
         })

@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class BrowserOption(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    schedule_id: int
+    browser_id: int
     user_id: int | None = None
     geo: str | None = None
     language: str | None = None
@@ -29,7 +29,7 @@ class Match(BaseModel):
     model_config = ConfigDict(extra='ignore')
 
     session_id: str
-    schedule_id: int
+    browser_id: int
     event_id: str | None = None
     chat_topic_id: str | None = None
     provider_user_id: int | None = None
@@ -70,7 +70,7 @@ class SessionInfo(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: int
-    schedule_id: int
+    browser_id: int
     started_at: datetime | None = None
     ended_at: datetime | None = None
     status: str = "active"

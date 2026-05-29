@@ -48,7 +48,7 @@ async def _eval_int(browser, expr: str) -> int:
     return int(resp.get("result", {}).get("value", 0))
 
 
-async def _discover_schedule():
+async def _discover_browser():
     from ceki_sdk import connect
     api_key = os.environ["CEKI_API_KEY"]
     client = await connect(api_key, _opts())
@@ -56,7 +56,7 @@ async def _discover_schedule():
         results = await client.search()
         if not results:
             pytest.skip("no providers online")
-        return results[0].schedule_id
+        return results[0].browser_id
     finally:
         await client.close()
 
@@ -113,12 +113,12 @@ async def test_fingerprint_persists_across_rents():
     from ceki_sdk import connect
 
     api_key = os.environ["CEKI_API_KEY"]
-    schedule_id = await _discover_schedule()
+    browser_id = await _discover_browser()
 
     # --- Session A: rent, collect fingerprint, export profile ---
     client_a = await connect(api_key, _opts())
     try:
-        browser_a = await client_a.rent(schedule_id)
+        browser_a = await client_a.rent(browser_id)
         try:
             a = await _collect_browser_fingerprint(browser_a)
         finally:
@@ -144,7 +144,7 @@ async def test_fingerprint_persists_across_rents():
     client_b = await connect(api_key, _opts())
     try:
         browser_b = await client_b.rent(
-            schedule_id,
+            browser_id,
             fingerprint=fingerprint_from_profile if fingerprint_from_profile else True,
         )
         try:

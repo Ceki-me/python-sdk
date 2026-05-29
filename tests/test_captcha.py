@@ -33,15 +33,15 @@ async def _setup_browser(mock_relay: MockRelayServer):
         "testkey",
         ConnectOptions(relay_url=url, api_url="http://localhost:9999"),
     )
-    rent_task = asyncio.create_task(client.rent(schedule_id=42))
+    rent_task = asyncio.create_task(client.rent(browser_id=42))
     await asyncio.sleep(0.05)
-    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "500", "schedule_id": 42})
+    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "500", "browser_id": 42})
     await asyncio.sleep(0.05)
     await mock_relay.send_to_all({
         "type": "match",
         "event_id": "500",
         "session_id": "sess-123",
-        "schedule_id": 42,
+        "browser_id": 42,
         "chat_topic_id": "topic-1",
         "provider_user_id": 77,
     })

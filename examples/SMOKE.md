@@ -4,7 +4,7 @@
 
 ## Pre-requisites
 
-1. Provider онлайн с известным `SCHEDULE_ID` на relay (`wss://browser.ceki.me/ws/agent`)
+1. Provider онлайн с известным `BROWSER_ID` на relay (`wss://browser.ceki.me/ws/agent`)
 2. Agent токен с ability `browser:relay` от dev backend
 3. IMAP-доступ к `kom@ceki.me` (plus-addressing)
 4. Chrome с установленным расширением Ceki на стороне провайдера
@@ -16,7 +16,7 @@
 export CEKI_API_KEY=1|<sanctum-token>
 export CEKI_RELAY_URL=wss://browser.ceki.me/ws/agent
 export CEKI_ENV=dev
-export SCHEDULE_ID=42
+export BROWSER_ID=42
 export IMAP_HOST=mail.ceki.me
 export IMAP_USER=kom@ceki.me
 export IMAP_PASS=<password>

@@ -14,7 +14,7 @@ async def connected_client(mock_relay):
     await client.close()
 
 
-async def _do_rent(client, mock_relay, session_id="sess-1", schedule_id=42):
+async def _do_rent(client, mock_relay, session_id="sess-1", browser_id=42):
     server_event_id = "ev-test-1"
 
     async def ack_rent():
@@ -25,13 +25,13 @@ async def _do_rent(client, mock_relay, session_id="sess-1", schedule_id=42):
             "type": "match",
             "event_id": server_event_id,
             "session_id": session_id,
-            "schedule_id": schedule_id,
+            "browser_id": browser_id,
             "chat_topic_id": None,
             "browser_info": {},
         })
 
     task = asyncio.create_task(ack_rent())
-    browser = await client.rent(schedule_id)
+    browser = await client.rent(browser_id)
     await task
     return browser
 

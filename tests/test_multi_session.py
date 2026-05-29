@@ -13,30 +13,30 @@ async def test_two_sessions_routed_independently(mock_relay):
     client = await connect("test-key", ConnectOptions(relay_url=url))
     acked: set[str] = set()
 
-    async def ack_rent(session_id: str, schedule_id: int) -> None:
+    async def ack_rent(session_id: str, browser_id: int) -> None:
         deadline = asyncio.get_event_loop().time() + 5
         while asyncio.get_event_loop().time() < deadline:
             await asyncio.sleep(0.05)
             rent = next(
                 (m for m in mock_relay.received
-                 if m.get("type") == "rent" and m.get("browser_id") == schedule_id
-                 and schedule_id not in acked),
+                 if m.get("type") == "rent" and m.get("browser_id") == browser_id
+                 and browser_id not in acked),
                 None,
             )
             if rent:
-                acked.add(schedule_id)
+                acked.add(browser_id)
                 ev_id = f"ev-{session_id}"
                 await mock_relay.send_to_all({
                     "type": "rent_pending",
                     "event_id": ev_id,
-                    "schedule_id": schedule_id,
+                    "browser_id": browser_id,
                 })
                 await asyncio.sleep(0.02)
                 await mock_relay.send_to_all({
                     "type": "match",
                     "event_id": ev_id,
                     "session_id": session_id,
-                    "schedule_id": schedule_id,
+                    "browser_id": browser_id,
                     "chat_topic_id": None,
                     "browser_info": {},
                 })
@@ -101,14 +101,14 @@ async def test_close_one_session_leaves_other_alive(mock_relay):
         await mock_relay.send_to_all({
             "type": "rent_pending",
             "event_id": ev_id,
-            "schedule_id": 1,
+            "browser_id": 1,
         })
         await asyncio.sleep(0.02)
         await mock_relay.send_to_all({
             "type": "match",
             "event_id": ev_id,
             "session_id": session_id,
-            "schedule_id": 1,
+            "browser_id": 1,
             "chat_topic_id": None,
             "browser_info": {},
         })
