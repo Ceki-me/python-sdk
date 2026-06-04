@@ -98,6 +98,37 @@ async def test_rent_early_error_without_event_id_raises_exception(
 
 
 @pytest.mark.asyncio
+async def test_rent_main_mode_forwards_mode_in_ws_message(mock_relay: MockRelayServer) -> None:
+    """Regression for task 399 / #310: rent(mode='main') must put mode in the
+    WS rent payload so the relay forwards it to POST /api/sessions and the
+    backend opens a main-profile session."""
+    url = f"ws://127.0.0.1:{mock_relay.port}"
+    client = await connect("testkey", ConnectOptions(relay_url=url))
+
+    rent_task = asyncio.create_task(client.rent(schedule_id=240, mode="main"))
+    await asyncio.sleep(0.05)
+
+    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "m1", "schedule_id": 240})
+    await asyncio.sleep(0.05)
+    await mock_relay.send_to_all({
+        "type": "match",
+        "event_id": "m1",
+        "session_id": "m1",
+        "schedule_id": 240,
+        "capabilities": {},
+        "price_per_min": 0.01,
+    })
+    await asyncio.wait_for(rent_task, timeout=5)
+
+    rent_msgs = [m for m in mock_relay.received if m.get("type") == "rent"]
+    assert len(rent_msgs) == 1
+    assert rent_msgs[0].get("mode") == "main"
+    assert rent_msgs[0]["browser_id"] == 240
+
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_rent_with_fingerprint_dict_sends_configure(mock_relay: MockRelayServer) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
     client = await connect("testkey", ConnectOptions(relay_url=url))
