@@ -245,23 +245,33 @@ class Browser:
             }})
 
     async def type(self, text: str) -> None:
+        # task 413 — typing humanizer moved into the extension. The SDK
+        # now sends ONE Ceki.typeText command instead of N per-char
+        # dispatchKeyEvent calls, so long inputs no longer burn through
+        # the 500 cmd / 60s relay cap and inter-key delays land without
+        # WS jitter. The extension owns keymap + profile timings.
         if self._humanizer:
             if self._last_pointer is not None:
                 await self.click(*self._last_pointer)
             else:
                 log.debug(
                     "type() called with humanizer but no last_pointer;"
-                    " falling back to plain insertText"
+                    " input may not land on the intended element"
                 )
             await self._humanizer.before("type")
-            async for char, delay_ms in self._humanizer.humanize_text(text):
-                await self._send_keystroke(char)
-                if delay_ms > 0:
-                    await asyncio.sleep(delay_ms / 1000)
+
+        human: str | None = None
+        if self._humanizer and self._humanizer.profile:
+            name = self._humanizer.profile.name
+            human = name if name in ("natural", "careful") else "natural"
+
+        await self.send({
+            "method": "Ceki.typeText",
+            "params": {"text": text, "human": human},
+        })
+
+        if self._humanizer:
             await self._humanizer.after("type")
-        else:
-            for char in text:
-                await self._send_keystroke(char)
 
     async def scroll(
         self, x: int = 0, y: int = 0, *, delta_x: int = 0, delta_y: int = -300

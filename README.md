@@ -144,7 +144,7 @@ browser = await client.rent(schedule_id, human={"typing": {"wpm": 130}})
 ```python
 await browser.navigate("https://example.com")
 await browser.click(100, 200)
-await browser.type("Hello, world!")  # Per-char with jitter when human mode on
+await browser.type("Hello, world!")  # Ships one Ceki.typeText command; extension fans it out per-char (keydown/keyUp/+shift) with human delays. Long text no longer trips the relay command cap.
 await browser.scroll(delta_y=-300)
 img_bytes = await browser.screenshot()
 ```

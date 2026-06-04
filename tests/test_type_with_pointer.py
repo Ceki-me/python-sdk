@@ -40,8 +40,8 @@ def browser_no_human():
     return b
 
 
-async def test_humanizer_on_with_pointer_clicks_before_type(browser_humanized: Browser):
-    """humanizer ON + last_pointer set → click() before dispatchKeyEvent."""
+async def test_humanizer_on_with_pointer_clicks_before_typetext(browser_humanized: Browser):
+    """humanizer ON + last_pointer set → SDK pre-focus click() before Ceki.typeText."""
     sent: list[dict] = []
 
     async def fake_send(cdp, **kw):
@@ -54,25 +54,22 @@ async def test_humanizer_on_with_pointer_clicks_before_type(browser_humanized: B
     await browser_humanized.type("ab")
 
     mouse_events = [s for s in sent if s["method"] == "Input.dispatchMouseEvent"]
-    key_events = [
-        s for s in sent
-        if s["method"] == "Input.dispatchKeyEvent"
-        and s["params"]["type"] == "keyDown"
-        and s["params"].get("key") != "Shift"
-    ]
+    type_events = [s for s in sent if s["method"] == "Ceki.typeText"]
 
     assert len(mouse_events) >= 2, "should have mousePressed + mouseReleased"
     assert any(e["params"]["type"] == "mousePressed" for e in mouse_events)
     assert any(e["params"]["type"] == "mouseReleased" for e in mouse_events)
-    assert len(key_events) == 2, "should have per-char keyDown events"
+    assert len(type_events) == 1
+    assert type_events[0]["params"]["text"] == "ab"
+    assert type_events[0]["params"]["human"] == "natural"
 
     first_mouse_idx = sent.index(mouse_events[0])
-    first_key_idx = sent.index(key_events[0])
-    assert first_mouse_idx < first_key_idx, "mouse events must precede key events"
+    typetext_idx = sent.index(type_events[0])
+    assert first_mouse_idx < typetext_idx, "pre-focus click must precede Ceki.typeText"
 
 
 async def test_humanizer_on_no_pointer_no_click(browser_humanized: Browser):
-    """humanizer ON + last_pointer is None → no mouse events, just dispatchKeyEvent."""
+    """humanizer ON + last_pointer is None → no pre-focus click, just Ceki.typeText."""
     sent: list[dict] = []
 
     async def fake_send(cdp, **kw):
@@ -85,19 +82,16 @@ async def test_humanizer_on_no_pointer_no_click(browser_humanized: Browser):
     await browser_humanized.type("x")
 
     mouse_events = [s for s in sent if s["method"] == "Input.dispatchMouseEvent"]
-    key_events = [
-        s for s in sent
-        if s["method"] == "Input.dispatchKeyEvent"
-        and s["params"]["type"] == "keyDown"
-        and s["params"].get("key") != "Shift"
-    ]
+    type_events = [s for s in sent if s["method"] == "Ceki.typeText"]
 
-    assert len(mouse_events) == 0, "no mouse events without last_pointer"
-    assert len(key_events) >= 1
+    assert len(mouse_events) == 0, "no pre-focus click without last_pointer"
+    assert len(type_events) == 1
+    assert type_events[0]["params"]["text"] == "x"
+    assert type_events[0]["params"]["human"] == "natural"
 
 
 async def test_humanizer_off_with_pointer_no_click(browser_no_human: Browser):
-    """humanizer OFF + last_pointer set → per-char dispatchKeyEvent, no click."""
+    """humanizer OFF + last_pointer set → no pre-focus click, single Ceki.typeText, human=None."""
     sent: list[dict] = []
 
     async def fake_send(cdp, **kw):
@@ -109,19 +103,17 @@ async def test_humanizer_off_with_pointer_no_click(browser_no_human: Browser):
 
     await browser_no_human.type("hello")
 
-    key_events = [s for s in sent if s["method"] == "Input.dispatchKeyEvent"]
-    keydowns = [
-        s for s in key_events
-        if s["params"]["type"] == "keyDown"
-        and s["params"].get("key") != "Shift"
-    ]
-    assert len(keydowns) == 5, "should have 5 keyDown events for 'hello'"
-    assert keydowns[0]["params"]["key"] == "h"
-    assert keydowns[4]["params"]["key"] == "o"
+    mouse_events = [s for s in sent if s["method"] == "Input.dispatchMouseEvent"]
+    type_events = [s for s in sent if s["method"] == "Ceki.typeText"]
+
+    assert len(mouse_events) == 0, "no pre-focus click without humanizer"
+    assert len(type_events) == 1
+    assert type_events[0]["params"]["text"] == "hello"
+    assert type_events[0]["params"]["human"] is None
 
 
 async def test_humanizer_off_no_pointer_no_click(browser_no_human: Browser):
-    """humanizer OFF + no last_pointer → per-char dispatchKeyEvent, no click."""
+    """humanizer OFF + no last_pointer → single Ceki.typeText, human=None."""
     sent: list[dict] = []
 
     async def fake_send(cdp, **kw):
@@ -133,12 +125,10 @@ async def test_humanizer_off_no_pointer_no_click(browser_no_human: Browser):
 
     await browser_no_human.type("world")
 
-    key_events = [s for s in sent if s["method"] == "Input.dispatchKeyEvent"]
-    keydowns = [
-        s for s in key_events
-        if s["params"]["type"] == "keyDown"
-        and s["params"].get("key") != "Shift"
-    ]
-    assert len(keydowns) == 5, "should have 5 keyDown events for 'world'"
-    assert keydowns[0]["params"]["key"] == "w"
-    assert keydowns[4]["params"]["key"] == "d"
+    mouse_events = [s for s in sent if s["method"] == "Input.dispatchMouseEvent"]
+    type_events = [s for s in sent if s["method"] == "Ceki.typeText"]
+
+    assert len(mouse_events) == 0
+    assert len(type_events) == 1
+    assert type_events[0]["params"]["text"] == "world"
+    assert type_events[0]["params"]["human"] is None

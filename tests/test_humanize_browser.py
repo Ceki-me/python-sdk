@@ -57,16 +57,17 @@ class TestBrowserHumanNone:
     """human=None means zero overhead."""
 
     @pytest.mark.asyncio
-    async def test_type_sends_per_char_keystrokes(self):
+    async def test_type_sends_single_typetext_with_human_none(self):
         b = _make_browser(human=None)
         b.send = AsyncMock(return_value={})
         await b.type("hello")
-        key_down_calls = [
+        type_calls = [
             c for c in b.send.call_args_list
-            if c[0][0].get("method") == "Input.dispatchKeyEvent"
-            and c[0][0]["params"].get("type") == "keyDown"
+            if c[0][0].get("method") == "Ceki.typeText"
         ]
-        assert len(key_down_calls) == 5
+        assert len(type_calls) == 1
+        assert type_calls[0][0][0]["params"]["text"] == "hello"
+        assert type_calls[0][0][0]["params"]["human"] is None
 
     @pytest.mark.asyncio
     async def test_click_no_sleep(self):
@@ -88,16 +89,17 @@ class TestBrowserHumanNatural:
     """human="natural" adds delays."""
 
     @pytest.mark.asyncio
-    async def test_type_per_char(self):
+    async def test_type_sends_single_typetext_with_human_natural(self):
         b = _make_browser(human="natural")
         b.send = AsyncMock(return_value={})
         await b.type("abc")
-        key_down_calls = [
+        type_calls = [
             c for c in b.send.call_args_list
-            if c[0][0].get("method") == "Input.dispatchKeyEvent"
-            and c[0][0]["params"].get("type") == "keyDown"
+            if c[0][0].get("method") == "Ceki.typeText"
         ]
-        assert len(key_down_calls) == 3
+        assert len(type_calls) == 1
+        assert type_calls[0][0][0]["params"]["text"] == "abc"
+        assert type_calls[0][0][0]["params"]["human"] == "natural"
 
     @pytest.mark.asyncio
     async def test_click_timing_variance(self):
