@@ -255,6 +255,66 @@ Successful commands write a single JSON line to stdout. Errors go to stderr as `
 
 Full reference (with EN+RU): https://browser.ceki.me/docs#cli
 
+## Troubleshooting
+
+Common errors and recovery patterns. The same handling applies to both the SDK API and the `ceki` CLI — exit codes and exception classes line up.
+
+### `"Browser is currently in use"` (BROWSER_BUSY) on rent
+
+The target browser already has an active session. Either:
+- Your previous session is a zombie (you never explicitly stopped it).
+- The browser is currently held by another renter or by the host themself.
+
+Recovery — check your own sessions, stop the zombie if present, then re-rent:
+
+```bash
+ceki sessions                  # active + recent (yours)
+ceki sessions --all --json     # include ended (audit)
+ceki stop <session_id>         # if a zombie of yours is listed
+ceki rent --schedule <id>
+```
+
+SDK equivalent:
+
+```python
+mine = await client.list_sessions(active=True)
+zombie = next((s for s in mine if s.browser_id == browser_id), None)
+if zombie:
+    b = await client.resume(zombie.session_id)
+    await b.close()
+fresh = await client.rent(schedule_id)
+```
+
+If no active session of yours matches that browser, it is held by someone else — wait 10–60s, or `search` for a different browser.
+
+### Rate limit (HTTP 429 on rent) — `RateLimitExceeded`
+
+Successful rents are capped per agent per hour. Once the cap is hit, the next attempt returns `429 {"error":"rate_limit","retry_after":<sec>}`. Respect the `Retry-After` header and the `.retry_after` field on the exception. Do not write a tight retry loop on rent.
+
+### `SessionNotFound` / `SessionExpired` (CLI exit code 3)
+
+The session ended or fell out of its grace window. Common causes: `user_stop` (host pressed Stop), `provider_offline` (host disconnected), `insufficient_funds` (balance ran out), `agent_end` (you called `close()` / `stop`). Recovery: re-rent. Stale locally-cached state for a vanished session (`~/.ceki/sessions/<sid>.json`) can be removed manually if a CLI command keeps trying to resume it.
+
+### `InsufficientFunds` (HTTP 402)
+
+Top up the agent wallet, or rent against a pre-arranged contract listed by `ceki my-browsers`.
+
+### `ProviderOffline` / `no_providers`
+
+The browser or schedule went offline (host closed the tab, network drop, etc.). Pick another via `ceki search`.
+
+### `CdpUnrecoverable`
+
+The relay's CDP reattach budget was exhausted (3 attempts failed). Stop the session and re-rent.
+
+### Long pauses between commands are OK
+
+The relay persists session state until an explicit finish — an agent-side disconnect does NOT end the session. Long gaps between CLI commands or SDK calls are safe; subsequent commands transparently resume.
+
+### MCP agents
+
+For MCP-based agents, the same recovery flow is exposed as the `recover-stuck-session` prompt on the MCP endpoint — invoke that prompt instead of replicating the logic above.
+
 ## Development
 
 ```bash
