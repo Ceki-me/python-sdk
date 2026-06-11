@@ -569,14 +569,23 @@ class Browser:
             "acceptance_deadline_at": int(acceptance_timeout),
             "completion_deadline_at": int(completion_timeout),
         }
-        async with httpx.AsyncClient() as http:
-            resp = await http.post(
-                f"{self._client.api_url}/api/agent/sessions/{self._match.event_id}/captcha-request",
-                headers={**self._api_headers(), "Content-Type": "application/json"},
-                json=body,
-            )
-            resp.raise_for_status()
-        result = resp.json()
+        url = f"{self._client.api_url}/api/agent/sessions/{self._match.event_id}/captcha-request"
+        backoff = [0.5, 1.0, 2.0, 4.0]
+        last_resp = None
+        for delay in [0.0] + backoff:
+            if delay:
+                await asyncio.sleep(delay)
+            async with httpx.AsyncClient() as http:
+                resp = await http.post(
+                    url,
+                    headers={**self._api_headers(), "Content-Type": "application/json"},
+                    json=body,
+                )
+            last_resp = resp
+            if resp.status_code != 422 or "Session not active" not in (resp.text or ""):
+                break
+        last_resp.raise_for_status()
+        result = last_resp.json()
         event_id = result.get("id")
         if not event_id:
             raise RuntimeError("captcha request did not return an id")
