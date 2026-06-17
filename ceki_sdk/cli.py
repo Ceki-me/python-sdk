@@ -406,6 +406,126 @@ async def _cmd_request_captcha(args: argparse.Namespace) -> None:
             await client.disconnect()
 
 
+def _contract_client():
+    from .contract import ContractClient
+    return ContractClient()
+
+
+def _contract_dump(value: Any) -> None:
+    if isinstance(value, str):
+        sys.stdout.write(value)
+        sys.stdout.write("\n")
+    else:
+        json.dump(value, sys.stdout, indent=2, ensure_ascii=False)
+        sys.stdout.write("\n")
+    sys.stdout.flush()
+
+
+def _cmd_contract(args: argparse.Namespace) -> int:
+    from .contract import ContractError, contract_ids_from_env
+
+    action = args.contract_action
+    try:
+        with _contract_client() as cli:
+            if action == "list":
+                _contract_dump(cli.list_contracts())
+            elif action == "members":
+                _contract_dump(cli.members(args.cid))
+            elif action == "tasks":
+                ids = [args.cid] if args.cid is not None else contract_ids_from_env()
+                if not ids:
+                    _err("no contract id (positional or CEKI_CONTRACT_IDS)", "args")
+                    return 1
+                for cid in ids:
+                    print(f"--- contract {cid} ---")
+                    _contract_dump(cli.tasks(int(cid)))
+            elif action == "my-jobs":
+                _contract_dump(cli.my_jobs())
+            elif action == "task":
+                _contract_dump(cli.task(args.eid))
+            elif action == "children":
+                _contract_dump(cli.children(args.eid))
+            elif action == "history":
+                _contract_dump(cli.history(args.eid))
+            elif action == "create":
+                cid = args.cid if args.cid is not None else (
+                    int(contract_ids_from_env()[0]) if contract_ids_from_env() else None
+                )
+                if cid is None:
+                    _err("contract id required (positional or CEKI_CONTRACT_IDS)", "args")
+                    return 1
+                _contract_dump(cli.create(
+                    cid,
+                    label=args.label,
+                    type_id=args.type,
+                    status_id=args.status,
+                    kal_schedule_id=args.kal_schedule,
+                    start=args.start,
+                    end=args.end,
+                    date=args.date,
+                    duration=args.duration,
+                    amount=args.amount,
+                    currency=args.currency,
+                    description=args.desc,
+                    benefitable=args.benefitable,
+                ))
+            elif action == "comment":
+                _contract_dump(cli.comment(
+                    args.eid,
+                    label=args.label,
+                    type_id=args.type,
+                    status_id=args.status,
+                    duration=args.duration,
+                    amount=args.amount,
+                    currency=args.currency,
+                    description=args.desc,
+                    benefitable=args.benefitable,
+                ))
+            elif action == "propose":
+                _contract_dump(cli.propose(
+                    args.eid,
+                    status_id=args.status,
+                    label=args.label,
+                    description=args.desc,
+                    duration=args.duration,
+                    amount=args.amount,
+                    currency=args.currency,
+                    benefitable=args.benefitable,
+                ))
+            elif action == "vote":
+                ids = [int(s) for s in str(args.ids).split(",") if s.strip()]
+                vote = str(args.vote).lower() in ("true", "1", "yes")
+                _contract_dump(cli.vote(args.eid, ids, vote))
+            elif action == "poll":
+                items = cli.poll()
+                _contract_dump({"count": len(items), "notifications": items})
+            elif action == "watch":
+                sec = max(6, int(args.interval or 8))
+                sys.stderr.write(f"[watch] poll every {sec}s (limit 10/min/token; do not go below 6s)\n")
+                sys.stderr.flush()
+                import time as _time
+                while True:
+                    items = cli.poll()
+                    if items:
+                        from datetime import datetime, timezone
+                        ts = datetime.now(timezone.utc).isoformat()
+                        for n in items:
+                            print(json.dumps({"ts": ts, "notification": n}, ensure_ascii=False))
+                    _time.sleep(sec)
+            elif action == "tools":
+                _contract_dump(cli.tools())
+            elif action == "raw":
+                payload = json.loads(args.args) if args.args else {}
+                _contract_dump(cli.raw(args.tool, payload))
+            else:
+                _err(f"unknown contract action: {action}")
+                return 1
+    except ContractError as e:
+        _err(str(e), "contract")
+        return 1
+    return 0
+
+
 async def _cmd_cdp(args: argparse.Namespace) -> None:
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
@@ -552,6 +672,80 @@ def build_parser() -> argparse.ArgumentParser:
     p_cdp.add_argument("--method", required=True, help="CDP method name")
     p_cdp.add_argument("--params", help="CDP params as JSON string")
 
+    p_contract = sub.add_parser("contract", help="Participate in contracts via /mcp/agent")
+    csub = p_contract.add_subparsers(dest="contract_action", required=True)
+
+    csub.add_parser("list", help="List my contracts (get-my-contracts)")
+
+    p_cm = csub.add_parser("members", help="List contract members")
+    p_cm.add_argument("cid", type=int, help="Contract ID")
+
+    p_ct = csub.add_parser("tasks", help="List contract events (default: CEKI_CONTRACT_IDS)")
+    p_ct.add_argument("cid", type=int, nargs="?", help="Contract ID")
+
+    csub.add_parser("my-jobs", help="List events assigned to me")
+
+    p_ctask = csub.add_parser("task", help="Get event")
+    p_ctask.add_argument("eid", type=int, help="Event ID")
+
+    p_cch = csub.add_parser("children", help="Get event children")
+    p_cch.add_argument("eid", type=int, help="Event ID")
+
+    p_chist = csub.add_parser("history", help="Get event audit history")
+    p_chist.add_argument("eid", type=int, help="Event ID")
+
+    p_cc = csub.add_parser("create", help="Create contract event")
+    p_cc.add_argument("cid", type=int, nargs="?", help="Contract ID (default: CEKI_CONTRACT_IDS[0])")
+    p_cc.add_argument("--label", required=True)
+    p_cc.add_argument("--type", type=int)
+    p_cc.add_argument("--status", type=int)
+    p_cc.add_argument("--kal-schedule", type=int, dest="kal_schedule")
+    p_cc.add_argument("--start")
+    p_cc.add_argument("--end")
+    p_cc.add_argument("--date")
+    p_cc.add_argument("--duration", type=int)
+    p_cc.add_argument("--amount", type=int)
+    p_cc.add_argument("--currency")
+    p_cc.add_argument("--benefitable", help="agent:8 or user:61")
+    p_cc.add_argument("--desc")
+
+    p_cco = csub.add_parser("comment", help="Post comment on event")
+    p_cco.add_argument("eid", type=int)
+    p_cco.add_argument("--label")
+    p_cco.add_argument("--type", type=int)
+    p_cco.add_argument("--status", type=int)
+    p_cco.add_argument("--duration", type=int)
+    p_cco.add_argument("--amount", type=int)
+    p_cco.add_argument("--currency")
+    p_cco.add_argument("--benefitable")
+    p_cco.add_argument("--desc")
+
+    p_cp = csub.add_parser("propose", help="Propose correction")
+    p_cp.add_argument("eid", type=int)
+    p_cp.add_argument("--status", type=int)
+    p_cp.add_argument("--label")
+    p_cp.add_argument("--desc")
+    p_cp.add_argument("--duration", type=int)
+    p_cp.add_argument("--amount", type=int)
+    p_cp.add_argument("--currency")
+    p_cp.add_argument("--benefitable")
+
+    p_cv = csub.add_parser("vote", help="Vote on correction(s)")
+    p_cv.add_argument("eid", type=int)
+    p_cv.add_argument("--ids", required=True, help="Comma-separated correction IDs")
+    p_cv.add_argument("--vote", required=True, help="true|false")
+
+    csub.add_parser("poll", help="Single agent polling tick")
+
+    p_cw = csub.add_parser("watch", help="Continuous polling")
+    p_cw.add_argument("interval", type=int, nargs="?", default=8, help="Seconds, min 6")
+
+    csub.add_parser("tools", help="List available MCP tools")
+
+    p_craw = csub.add_parser("raw", help="Call raw MCP tool")
+    p_craw.add_argument("tool")
+    p_craw.add_argument("args", nargs="?", default="{}", help="JSON args")
+
     return parser
 
 
@@ -580,6 +774,9 @@ def main() -> None:
         "upload": _cmd_upload,
         "request-captcha": _cmd_request_captcha,
     }
+
+    if args.command == "contract":
+        sys.exit(_cmd_contract(args))
 
     handler = handlers.get(args.command)
     if not handler:
