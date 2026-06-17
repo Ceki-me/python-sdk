@@ -526,6 +526,28 @@ def _cmd_contract(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_timelog(args: argparse.Namespace) -> int:
+    from .contract import ContractError
+    from .timelog import TimelogClient
+
+    action = args.timelog_action
+    try:
+        with TimelogClient() as cli:
+            if action == "start":
+                _contract_dump(cli.start(args.event_id))
+            elif action == "stop":
+                _contract_dump(cli.stop(args.event_id, label=args.label))
+            elif action == "check":
+                _contract_dump(cli.check(args.event_id))
+            else:
+                _err(f"unknown timelog action: {action}")
+                return 1
+    except ContractError as e:
+        _err(str(e), "timelog")
+        return 1
+    return 0
+
+
 async def _cmd_cdp(args: argparse.Namespace) -> None:
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
@@ -746,6 +768,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_craw.add_argument("tool")
     p_craw.add_argument("args", nargs="?", default="{}", help="JSON args")
 
+    p_timelog = sub.add_parser(
+        "timelog", help="Time-tracking for events via /mcp/agent (start/stop/check)"
+    )
+    tlsub = p_timelog.add_subparsers(dest="timelog_action", required=True)
+
+    p_tls = tlsub.add_parser("start", help="Open timelog for event_id (timelog-start)")
+    p_tls.add_argument("event_id", type=int, help="Event ID")
+
+    p_tlp = tlsub.add_parser(
+        "stop", help="Close open timelog for event_id (timelog-stop); duration computed server-side"
+    )
+    p_tlp.add_argument("event_id", type=int, help="Event ID")
+    p_tlp.add_argument("--label", help="Label for the closing child event (e.g. 'что сделал')")
+
+    p_tlc = tlsub.add_parser(
+        "check", help="Check whether an open timelog exists for event_id (timelog-check)"
+    )
+    p_tlc.add_argument("event_id", type=int, help="Event ID")
+
     return parser
 
 
@@ -777,6 +818,9 @@ def main() -> None:
 
     if args.command == "contract":
         sys.exit(_cmd_contract(args))
+
+    if args.command == "timelog":
+        sys.exit(_cmd_timelog(args))
 
     handler = handlers.get(args.command)
     if not handler:

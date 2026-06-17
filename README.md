@@ -296,6 +296,21 @@ ceki contract raw <tool> '<json-args>'              # call any tool directly
 Polling is rate-limited to 10 calls/minute per token; `watch` enforces a 6s
 minimum interval.
 
+### `ceki timelog` — event time tracking via `/mcp/agent`
+
+Top-level group (not under `contract`). Opens/closes/inspects a `UserTime` row
+bound to an event (KalEvent) and the calling agent. Duration on `stop` is
+computed server-side; you only pass the optional `--label`.
+
+```
+ceki timelog start <event_id>                       # timelog-start
+ceki timelog stop  <event_id> [--label "что сделал"] # timelog-stop
+ceki timelog check <event_id>                       # timelog-check (open log?)
+```
+
+Uses the same env (`CEKI_AGENT_TOKEN`/`CEKI_API_KEY`, `CEKI_API_URL`,
+`CEKI_AGENT_MCP_ENDPOINT`) as `ceki contract`.
+
 ## Development
 
 ```bash
