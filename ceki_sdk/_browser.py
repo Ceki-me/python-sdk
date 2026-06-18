@@ -244,16 +244,41 @@ class Browser:
                 "windowsVirtualKeyCode": 16, "nativeVirtualKeyCode": 16,
             }})
 
-    async def type(self, text: str) -> None:
+    async def type(self, text: str, *, selector: str | None = None) -> None:
         # task 413 — typing humanizer moved into the extension. The SDK
         # now sends ONE Ceki.typeText command instead of N per-char
         # dispatchKeyEvent calls, so long inputs no longer burn through
         # the 500 cmd / 60s relay cap and inter-key delays land without
         # WS jitter. The extension owns keymap + profile timings.
+        #
+        # task 425 — optional `selector` focuses the target element via
+        # DOM querySelector + .focus() before typing. Native-flow signup
+        # (signup.live.com et al.) needs an explicit focus when the agent
+        # hasn't clicked first; without it Ceki.typeText fires Input.
+        # dispatchKeyEvent against document.body and the chars vanish.
+        if selector is not None:
+            js_selector = json.dumps(selector)
+            js_expr = (
+                "(function(){"
+                f"var el = document.querySelector({js_selector});"
+                "if (!el) return JSON.stringify({error:'no element matched'});"
+                "if (typeof el.focus === 'function') el.focus();"
+                "return JSON.stringify({ok:true});"
+                "})()"
+            )
+            resp = await self.send({
+                "method": "Runtime.evaluate",
+                "params": {"expression": js_expr, "returnByValue": True},
+            })
+            value = resp.get("result", {}).get("value", "")
+            parsed = json.loads(value) if isinstance(value, str) else value
+            if isinstance(parsed, dict) and parsed.get("error"):
+                raise ValueError(parsed["error"])
+
         if self._humanizer:
-            if self._last_pointer is not None:
+            if self._last_pointer is not None and selector is None:
                 await self.click(*self._last_pointer)
-            else:
+            elif selector is None:
                 log.debug(
                     "type() called with humanizer but no last_pointer;"
                     " input may not land on the intended element"
@@ -290,21 +315,28 @@ class Browser:
         *,
         format: Literal["base64", "png"] = "base64",
         full_page: bool = False,
+        timeout: float = 120.0,
     ) -> dict | bytes:
         """Take a screenshot.
 
         Args:
             format: ``"base64"`` (default) returns CDP-shape dict, ``"png"`` returns raw PNG bytes.
             full_page: If True, capture the entire scrollable page, not just the viewport.
+            timeout: CDP timeout in seconds (default 120 — heavy pages like
+                signup.live.com routinely take 60+ seconds to capture, task 425).
         """
         if format not in ("base64", "png"):
             raise ValueError(f"Unsupported format: {format!r}. Use 'base64' or 'png'.")
         if self._humanizer:
             await self._humanizer.before("screenshot")
 
-        params: dict[str, Any] = {}
+        # task 425 BUG-3 — `optimizeForSpeed: true` skips the JPEG quality
+        # tuning Chrome would otherwise run when the page is still painting
+        # (signup.live.com lazy-loads frames for ~minutes). Combined with
+        # the bumped timeout this turns 60s timeouts into sub-second captures.
+        params: dict[str, Any] = {"optimizeForSpeed": True}
         if full_page:
-            metrics = await self.send({"method": "Page.getLayoutMetrics"})
+            metrics = await self.send({"method": "Page.getLayoutMetrics"}, timeout=timeout)
             content = metrics.get("contentSize", {})
             width = int(content.get("width", 0))
             height = int(content.get("height", 0))
@@ -315,7 +347,9 @@ class Browser:
             params["captureBeyondViewport"] = True
             params["clip"] = {"x": 0, "y": 0, "width": width, "height": height, "scale": 1}
 
-        resp = await self.send({"method": "Page.captureScreenshot", "params": params})
+        resp = await self.send(
+            {"method": "Page.captureScreenshot", "params": params}, timeout=timeout,
+        )
         if self._humanizer:
             await self._humanizer.after("screenshot")
         if format == "base64":
@@ -324,9 +358,14 @@ class Browser:
         data = resp.get("data", "")
         return _b64.b64decode(data) if data else b""
 
-    async def snapshot(self) -> Snapshot:
+    async def snapshot(self, *, timeout: float = 120.0) -> Snapshot:
         from datetime import datetime, timezone
-        resp = await self.send({"method": "Page.captureScreenshot"})
+        # task 425 BUG-3 — same `optimizeForSpeed` + bumped timeout as
+        # screenshot(); heavy pages would otherwise hit the 60s default.
+        resp = await self.send(
+            {"method": "Page.captureScreenshot", "params": {"optimizeForSpeed": True}},
+            timeout=timeout,
+        )
         screenshot_b64 = resp.get("data", "")
         all_msgs = await self.chat.history(since=self._last_seen_ts)
         if self._last_seen_ts and all_msgs:

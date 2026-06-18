@@ -143,7 +143,7 @@ async def _cmd_type(args: argparse.Namespace) -> None:
     if human is None:
         browser.set_human(None)
     try:
-        await browser.type(args.text)
+        await browser.type(args.text, selector=args.selector)
         _out({"ok": True})
     finally:
         if client._ws:
@@ -258,7 +258,7 @@ async def _cmd_sessions(args: argparse.Namespace) -> None:
         limit = getattr(args, "limit", 50)
         results = await client.list_sessions(active=active, limit=limit)
         if getattr(args, "json", False):
-            _out([r.model_dump() for r in results])
+            _out([r.model_dump(mode="json") for r in results])
         else:
             if not results:
                 print("No sessions found.")
@@ -287,7 +287,7 @@ async def _cmd_my_browsers(args: argparse.Namespace) -> None:
     client = await connect(api_key, _connect_options())
     try:
         results = await client.my_browsers()
-        _out([r.model_dump() for r in results])
+        _out([r.model_dump(mode="json") for r in results])
     finally:
         if client._ws:
             await client.disconnect()
@@ -302,7 +302,7 @@ async def _cmd_search(args: argparse.Namespace) -> None:
             k, v = f.split("=", 1)
             filters[k] = v
         results = await client.search(filters=filters, limit=args.limit)
-        _out([r.model_dump() for r in results])
+        _out([r.model_dump(mode="json") for r in results])
     finally:
         if client._ws:
             await client.disconnect()
@@ -590,6 +590,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_type.add_argument("session_id", help="Session ID")
     p_type.add_argument("text", help="Text to type")
     p_type.add_argument("--natural", action="store_true", help="Enable human-like typing")
+    p_type.add_argument(
+        "--selector",
+        help="CSS selector to focus before typing (e.g. 'input[type=email]')",
+    )
 
     p_scroll = sub.add_parser("scroll", help="Scroll")
     p_scroll.add_argument("session_id", help="Session ID")
