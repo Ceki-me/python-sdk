@@ -184,8 +184,9 @@ class ContractClient:
     def children(self, event_id: int) -> Any:
         return self.call(_TOOL_MAP["children"], {"event_id": int(event_id)})
 
-    def history(self, event_id: int) -> Any:
-        return self.call(_TOOL_MAP["history"], {"event_id": int(event_id)})
+    def history(self, event_id: int, *, limit: int | None = None) -> Any:
+        args = _clean({"event_id": int(event_id), "limit": limit})
+        return self.call(_TOOL_MAP["history"], args)
 
     def create(
         self,
@@ -197,11 +198,13 @@ class ContractClient:
         kal_schedule_id: int | None = None,
         start: str | None = None,
         end: str | None = None,
+        timezone: str | None = None,
         date: str | None = None,
         duration: int | None = None,
         amount: int | None = None,
         currency: str | None = None,
         description: str | None = None,
+        data: dict[str, Any] | None = None,
         benefitable: str | None = None,
     ) -> Any:
         args = _clean({
@@ -212,11 +215,13 @@ class ContractClient:
             "kal_schedule_id": kal_schedule_id,
             "start": start,
             "end": end,
+            "timezone": timezone,
             "date": date,
             "duration": duration,
             "amount": amount,
             "currency": currency,
             "description": description,
+            "data": data,
             "benefitable": _benefitable(benefitable),
         })
         return self.call(_TOOL_MAP["create"], args)
@@ -228,6 +233,9 @@ class ContractClient:
         label: str | None = None,
         type_id: int | None = None,
         status_id: int | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        date: str | None = None,
         duration: int | None = None,
         amount: int | None = None,
         currency: str | None = None,
@@ -239,6 +247,9 @@ class ContractClient:
             "label": label,
             "type_id": type_id,
             "status_id": status_id,
+            "start": start,
+            "end": end,
+            "date": date,
             "duration": duration,
             "amount": amount,
             "currency": currency,
@@ -254,6 +265,9 @@ class ContractClient:
         status_id: int | None = None,
         label: str | None = None,
         description: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        date: str | None = None,
         duration: int | None = None,
         amount: int | None = None,
         currency: str | None = None,
@@ -264,6 +278,9 @@ class ContractClient:
             "status_id": status_id,
             "label": label,
             "description": description,
+            "start": start,
+            "end": end,
+            "date": date,
             "duration": duration,
             "amount": amount,
             "currency": currency,

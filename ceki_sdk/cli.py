@@ -446,7 +446,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
             elif action == "children":
                 _contract_dump(cli.children(args.eid))
             elif action == "history":
-                _contract_dump(cli.history(args.eid))
+                _contract_dump(cli.history(args.eid, limit=args.limit))
             elif action == "create":
                 cid = args.cid if args.cid is not None else (
                     int(contract_ids_from_env()[0]) if contract_ids_from_env() else None
@@ -454,6 +454,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                 if cid is None:
                     _err("contract id required (positional or CEKI_CONTRACT_IDS)", "args")
                     return 1
+                data_obj = json.loads(args.data) if args.data else None
                 _contract_dump(cli.create(
                     cid,
                     label=args.label,
@@ -462,11 +463,13 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     kal_schedule_id=args.kal_schedule,
                     start=args.start,
                     end=args.end,
+                    timezone=args.timezone,
                     date=args.date,
                     duration=args.duration,
                     amount=args.amount,
                     currency=args.currency,
                     description=args.desc,
+                    data=data_obj,
                     benefitable=args.benefitable,
                 ))
             elif action == "comment":
@@ -475,6 +478,9 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     label=args.label,
                     type_id=args.type,
                     status_id=args.status,
+                    start=args.start,
+                    end=args.end,
+                    date=args.date,
                     duration=args.duration,
                     amount=args.amount,
                     currency=args.currency,
@@ -487,6 +493,9 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     status_id=args.status,
                     label=args.label,
                     description=args.desc,
+                    start=args.start,
+                    end=args.end,
+                    date=args.date,
                     duration=args.duration,
                     amount=args.amount,
                     currency=args.currency,
@@ -719,6 +728,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_chist = csub.add_parser("history", help="Get event audit history")
     p_chist.add_argument("eid", type=int, help="Event ID")
+    p_chist.add_argument("--limit", type=int, help="Max entries")
 
     p_cc = csub.add_parser("create", help="Create contract event")
     p_cc.add_argument("cid", type=int, nargs="?", help="Contract ID (default: CEKI_CONTRACT_IDS[0])")
@@ -728,18 +738,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_cc.add_argument("--kal-schedule", type=int, dest="kal_schedule")
     p_cc.add_argument("--start")
     p_cc.add_argument("--end")
+    p_cc.add_argument("--timezone", help="IANA tz (e.g. Europe/Moscow)")
     p_cc.add_argument("--date")
     p_cc.add_argument("--duration", type=int)
     p_cc.add_argument("--amount", type=int)
     p_cc.add_argument("--currency")
     p_cc.add_argument("--benefitable", help="agent:8 or user:61")
     p_cc.add_argument("--desc")
+    p_cc.add_argument("--data", help="Extra JSON object passed through as `data`")
 
     p_cco = csub.add_parser("comment", help="Post comment on event")
     p_cco.add_argument("eid", type=int)
     p_cco.add_argument("--label")
     p_cco.add_argument("--type", type=int)
     p_cco.add_argument("--status", type=int)
+    p_cco.add_argument("--start")
+    p_cco.add_argument("--end")
+    p_cco.add_argument("--date")
     p_cco.add_argument("--duration", type=int)
     p_cco.add_argument("--amount", type=int)
     p_cco.add_argument("--currency")
@@ -751,6 +766,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_cp.add_argument("--status", type=int)
     p_cp.add_argument("--label")
     p_cp.add_argument("--desc")
+    p_cp.add_argument("--start")
+    p_cp.add_argument("--end")
+    p_cp.add_argument("--date")
     p_cp.add_argument("--duration", type=int)
     p_cp.add_argument("--amount", type=int)
     p_cp.add_argument("--currency")

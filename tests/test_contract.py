@@ -296,3 +296,80 @@ def test_parser_contract_tasks_optional_cid():
     assert a.cid is None
     a = build_parser().parse_args(["contract", "tasks", "14"])
     assert a.cid == 14
+
+
+# ── extended MCP schema coverage (timezone/data/start/end/date/limit) ──
+
+
+def test_create_passes_timezone_and_data():
+    http, _ = _http_mock(_mcp_text({"id": 5}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.create(
+        14, label="L", timezone="Europe/Moscow",
+        data={"foo": "bar"}, start="2026-06-20 10:00:00",
+    )
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["timezone"] == "Europe/Moscow"
+    assert args["data"] == {"foo": "bar"}
+    assert args["start"] == "2026-06-20 10:00:00"
+
+
+def test_comment_passes_start_end_date():
+    http, _ = _http_mock(_mcp_text({}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.comment(7, label="x", start="s", end="e", date="2026-06-18")
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["start"] == "s" and args["end"] == "e" and args["date"] == "2026-06-18"
+
+
+def test_propose_passes_start_end_date():
+    http, _ = _http_mock(_mcp_text({}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.propose(7, status_id=200, start="s", end="e", date="2026-06-18")
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["start"] == "s" and args["end"] == "e" and args["date"] == "2026-06-18"
+
+
+def test_history_passes_limit():
+    http, _ = _http_mock(_mcp_text([]))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.history(42, limit=10)
+    args = _captured_body(http)["params"]["arguments"]
+    assert args == {"event_id": 42, "limit": 10}
+
+
+def test_history_no_limit_omits_field():
+    http, _ = _http_mock(_mcp_text([]))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.history(42)
+    args = _captured_body(http)["params"]["arguments"]
+    assert args == {"event_id": 42}
+
+
+def test_parser_history_limit():
+    a = build_parser().parse_args(["contract", "history", "5", "--limit", "20"])
+    assert a.eid == 5 and a.limit == 20
+
+
+def test_parser_create_timezone_data():
+    a = build_parser().parse_args([
+        "contract", "create", "14", "--label", "X",
+        "--timezone", "UTC", "--data", '{"k":1}',
+    ])
+    assert a.timezone == "UTC" and a.data == '{"k":1}'
+
+
+def test_parser_comment_start_end_date():
+    a = build_parser().parse_args([
+        "contract", "comment", "5",
+        "--start", "s", "--end", "e", "--date", "d",
+    ])
+    assert a.start == "s" and a.end == "e" and a.date == "d"
+
+
+def test_parser_propose_start_end_date():
+    a = build_parser().parse_args([
+        "contract", "propose", "5",
+        "--start", "s", "--end", "e", "--date", "d",
+    ])
+    assert a.start == "s" and a.end == "e" and a.date == "d"
