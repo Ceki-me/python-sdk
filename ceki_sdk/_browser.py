@@ -251,30 +251,13 @@ class Browser:
         # the 500 cmd / 60s relay cap and inter-key delays land without
         # WS jitter. The extension owns keymap + profile timings.
         #
-        # task 425 — optional `selector` focuses the target element via
-        # DOM querySelector + .focus() before typing. Native-flow signup
-        # (signup.live.com et al.) needs an explicit focus when the agent
-        # hasn't clicked first; without it Ceki.typeText fires Input.
-        # dispatchKeyEvent against document.body and the chars vanish.
-        if selector is not None:
-            js_selector = json.dumps(selector)
-            js_expr = (
-                "(function(){"
-                f"var el = document.querySelector({js_selector});"
-                "if (!el) return JSON.stringify({error:'no element matched'});"
-                "if (typeof el.focus === 'function') el.focus();"
-                "return JSON.stringify({ok:true});"
-                "})()"
-            )
-            resp = await self.send({
-                "method": "Runtime.evaluate",
-                "params": {"expression": js_expr, "returnByValue": True},
-            })
-            value = resp.get("result", {}).get("value", "")
-            parsed = json.loads(value) if isinstance(value, str) else value
-            if isinstance(parsed, dict) and parsed.get("error"):
-                raise ValueError(parsed["error"])
-
+        # task 425 BUG-1 — optional `selector` is forwarded to the extension
+        # which focuses the matching element via chrome.scripting.executeScript
+        # across all frames. The previous SDK-side Runtime.evaluate hit
+        # "ReferenceError: document is not defined" on signup.live.com et al.
+        # because Chrome routed the bare CDP eval to the page's service-worker
+        # execution context where `document` is undefined. chrome.scripting
+        # always lands in a page frame.
         if self._humanizer:
             if self._last_pointer is not None and selector is None:
                 await self.click(*self._last_pointer)
@@ -290,10 +273,11 @@ class Browser:
             name = self._humanizer.profile.name
             human = name if name in ("natural", "careful") else "natural"
 
-        await self.send({
-            "method": "Ceki.typeText",
-            "params": {"text": text, "human": human},
-        })
+        params: dict[str, Any] = {"text": text, "human": human}
+        if selector is not None:
+            params["selector"] = selector
+
+        await self.send({"method": "Ceki.typeText", "params": params})
 
         if self._humanizer:
             await self._humanizer.after("type")
