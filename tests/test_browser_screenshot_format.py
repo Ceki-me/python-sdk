@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from unittest.mock import AsyncMock, call, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -70,7 +70,8 @@ async def test_screenshot_full_page_sends_layout_metrics_and_clip(browser: Brows
     result = await browser.screenshot(full_page=True)
     assert isinstance(result, dict)
     assert browser.send.call_count == 2
-    assert browser.send.call_args_list[0] == call({"method": "Page.getLayoutMetrics"})
+    metrics_call = browser.send.call_args_list[0]
+    assert metrics_call.args[0] == {"method": "Page.getLayoutMetrics"}
     capture_call = browser.send.call_args_list[1].args[0]
     assert capture_call["method"] == "Page.captureScreenshot"
     assert capture_call["params"]["captureBeyondViewport"] is True

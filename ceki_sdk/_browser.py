@@ -191,28 +191,43 @@ class Browser:
     # High-level browser actions (with optional human-like timing)
     # ──────────────────────────────────────────────────────────────────────────
 
-    async def navigate(self, url: str, *, timeout: float = 30.0) -> dict:
-        if self._humanizer:
-            await self._humanizer.before("navigate")
+    def _humanize_for_call(self, human: bool | None) -> "Humanizer | None":
+        # task 427 — per-call kill-switch. human=False bypasses humanizer
+        # (timings) AND tells the extension to skip mouse-jitter via the
+        # `_ceki_raw` param marker (see cdp.ts in ceki-browser-extension).
+        # human=None → use session default (env / constructor). human=True
+        # forces humanizer even if global env disabled it (corner case;
+        # respects None humanizer if no profile).
+        if human is False:
+            return None
+        return self._humanizer
+
+    async def navigate(self, url: str, *, timeout: float = 30.0, human: bool | None = None) -> dict:
+        h = self._humanize_for_call(human)
+        if h:
+            await h.before("navigate")
         result = await self.send(
             {"method": "Page.navigate", "params": {"url": url}}, timeout=timeout,
         )
-        if self._humanizer:
-            await self._humanizer.after("navigate")
+        if h:
+            await h.after("navigate")
         return result
 
-    async def click(self, x: int | float, y: int | float) -> None:
-        if self._humanizer:
-            await self._humanizer.before("click")
+    async def click(self, x: int | float, y: int | float, *, human: bool | None = None) -> None:
+        h = self._humanize_for_call(human)
+        if h:
+            await h.before("click")
+        raw_flag = {"_ceki_raw": True} if h is None else {}
         await self.send({"method": "Input.dispatchMouseEvent", "params": {
             "type": "mousePressed", "x": int(x), "y": int(y), "button": "left", "clickCount": 1,
+            **raw_flag,
         }})
         await self.send({"method": "Input.dispatchMouseEvent", "params": {
             "type": "mouseReleased", "x": int(x), "y": int(y), "button": "left", "clickCount": 1,
         }})
         self._last_pointer = (int(x), int(y))
-        if self._humanizer:
-            await self._humanizer.after("click")
+        if h:
+            await h.after("click")
 
     async def _send_keystroke(self, char: str) -> None:
         from .humanize.keymap import keymap_for_char
@@ -244,67 +259,92 @@ class Browser:
                 "windowsVirtualKeyCode": 16, "nativeVirtualKeyCode": 16,
             }})
 
-    async def type(self, text: str) -> None:
+    async def type(
+        self,
+        text: str,
+        *,
+        selector: str | None = None,
+        human: bool | None = None,
+    ) -> None:
         # task 413 — typing humanizer moved into the extension. The SDK
         # now sends ONE Ceki.typeText command instead of N per-char
         # dispatchKeyEvent calls, so long inputs no longer burn through
         # the 500 cmd / 60s relay cap and inter-key delays land without
         # WS jitter. The extension owns keymap + profile timings.
-        if self._humanizer:
-            if self._last_pointer is not None:
+        #
+        # task 425 BUG-1 — optional `selector` is forwarded to the extension
+        # which focuses the matching element via chrome.scripting.executeScript
+        # across all frames. The previous SDK-side Runtime.evaluate hit
+        # "ReferenceError: document is not defined" on signup.live.com et al.
+        # because Chrome routed the bare CDP eval to the page's service-worker
+        # execution context where `document` is undefined. chrome.scripting
+        # always lands in a page frame.
+        h = self._humanize_for_call(human)
+        if h:
+            if self._last_pointer is not None and selector is None:
                 await self.click(*self._last_pointer)
-            else:
+            elif selector is None:
                 log.debug(
                     "type() called with humanizer but no last_pointer;"
                     " input may not land on the intended element"
                 )
-            await self._humanizer.before("type")
+            await h.before("type")
 
-        human: str | None = None
-        if self._humanizer and self._humanizer.profile:
-            name = self._humanizer.profile.name
-            human = name if name in ("natural", "careful") else "natural"
+        human_name: str | None = None
+        if h and h.profile:
+            name = h.profile.name
+            human_name = name if name in ("natural", "careful") else "natural"
 
-        await self.send({
-            "method": "Ceki.typeText",
-            "params": {"text": text, "human": human},
-        })
+        params: dict[str, Any] = {"text": text, "human": human_name}
+        if selector is not None:
+            params["selector"] = selector
 
-        if self._humanizer:
-            await self._humanizer.after("type")
+        await self.send({"method": "Ceki.typeText", "params": params})
+
+        if h:
+            await h.after("type")
 
     async def scroll(
-        self, x: int = 0, y: int = 0, *, delta_x: int = 0, delta_y: int = -300
+        self, x: int = 0, y: int = 0, *, delta_x: int = 0, delta_y: int = -300,
+        human: bool | None = None,
     ) -> None:
-        if self._humanizer:
-            await self._humanizer.before("scroll")
+        h = self._humanize_for_call(human)
+        if h:
+            await h.before("scroll")
         await self.send({"method": "Input.dispatchMouseEvent", "params": {
             "type": "mouseWheel", "x": x, "y": y, "deltaX": delta_x, "deltaY": delta_y,
         }})
         self._last_pointer = (int(x), int(y))
-        if self._humanizer:
-            await self._humanizer.after("scroll")
+        if h:
+            await h.after("scroll")
 
     async def screenshot(
         self,
         *,
         format: Literal["base64", "png"] = "base64",
         full_page: bool = False,
+        timeout: float = 120.0,
     ) -> dict | bytes:
         """Take a screenshot.
 
         Args:
             format: ``"base64"`` (default) returns CDP-shape dict, ``"png"`` returns raw PNG bytes.
             full_page: If True, capture the entire scrollable page, not just the viewport.
+            timeout: CDP timeout in seconds (default 120 — heavy pages like
+                signup.live.com routinely take 60+ seconds to capture, task 425).
         """
         if format not in ("base64", "png"):
             raise ValueError(f"Unsupported format: {format!r}. Use 'base64' or 'png'.")
         if self._humanizer:
             await self._humanizer.before("screenshot")
 
-        params: dict[str, Any] = {}
+        # task 425 BUG-3 — `optimizeForSpeed: true` skips the JPEG quality
+        # tuning Chrome would otherwise run when the page is still painting
+        # (signup.live.com lazy-loads frames for ~minutes). Combined with
+        # the bumped timeout this turns 60s timeouts into sub-second captures.
+        params: dict[str, Any] = {"optimizeForSpeed": True}
         if full_page:
-            metrics = await self.send({"method": "Page.getLayoutMetrics"})
+            metrics = await self.send({"method": "Page.getLayoutMetrics"}, timeout=timeout)
             content = metrics.get("contentSize", {})
             width = int(content.get("width", 0))
             height = int(content.get("height", 0))
@@ -315,7 +355,9 @@ class Browser:
             params["captureBeyondViewport"] = True
             params["clip"] = {"x": 0, "y": 0, "width": width, "height": height, "scale": 1}
 
-        resp = await self.send({"method": "Page.captureScreenshot", "params": params})
+        resp = await self.send(
+            {"method": "Page.captureScreenshot", "params": params}, timeout=timeout,
+        )
         if self._humanizer:
             await self._humanizer.after("screenshot")
         if format == "base64":
@@ -324,9 +366,14 @@ class Browser:
         data = resp.get("data", "")
         return _b64.b64decode(data) if data else b""
 
-    async def snapshot(self) -> Snapshot:
+    async def snapshot(self, *, timeout: float = 120.0) -> Snapshot:
         from datetime import datetime, timezone
-        resp = await self.send({"method": "Page.captureScreenshot"})
+        # task 425 BUG-3 — same `optimizeForSpeed` + bumped timeout as
+        # screenshot(); heavy pages would otherwise hit the 60s default.
+        resp = await self.send(
+            {"method": "Page.captureScreenshot", "params": {"optimizeForSpeed": True}},
+            timeout=timeout,
+        )
         screenshot_b64 = resp.get("data", "")
         all_msgs = await self.chat.history(since=self._last_seen_ts)
         if self._last_seen_ts and all_msgs:

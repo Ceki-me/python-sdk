@@ -92,6 +92,44 @@ def test_parser_type_natural():
     assert args.natural is True
 
 
+def test_parser_type_no_human():
+    parser = build_parser()
+    args = parser.parse_args(["type", "ses-1", "hi", "--no-human"])
+    assert args.no_human is True
+
+
+# task 429 — typing humanized BY DEFAULT (revert of 428 opt-in).
+# Default + --natural → human=None (SDK humanizer ON).
+# --no-human / --raw → human=False (explicit flat for THIS call only).
+# --natural is a no-op alias, not a switch.
+
+def _resolve_type_human(args):
+    """Mirror of cli._human_flag for `ceki type` post-429."""
+    if getattr(args, "no_human", False) or getattr(args, "raw", False):
+        return False
+    return None
+
+
+def test_type_default_is_humanized():
+    a = build_parser().parse_args(["type", "ses-1", "hi"])
+    assert _resolve_type_human(a) is None
+
+
+def test_type_natural_is_noop_default_remains_on():
+    a = build_parser().parse_args(["type", "ses-1", "hi", "--natural"])
+    assert _resolve_type_human(a) is None
+
+
+def test_type_no_human_explicit_flat():
+    a = build_parser().parse_args(["type", "ses-1", "hi", "--no-human"])
+    assert _resolve_type_human(a) is False
+
+
+def test_type_no_human_wins_over_natural():
+    a = build_parser().parse_args(["type", "ses-1", "hi", "--natural", "--no-human"])
+    assert _resolve_type_human(a) is False
+
+
 def test_parser_scroll():
     parser = build_parser()
     args = parser.parse_args(["scroll", "ses-1", "0", "0", "-300"])
