@@ -519,7 +519,9 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                 _contract_dump({"count": len(items), "notifications": items})
             elif action == "watch":
                 sec = max(6, int(args.interval or 8))
-                sys.stderr.write(f"[watch] poll every {sec}s (limit 10/min/token; do not go below 6s)\n")
+                sys.stderr.write(
+                    f"[watch] poll every {sec}s (limit 10/min/token; do not go below 6s)\n"
+                )
                 sys.stderr.flush()
                 import time as _time
                 while True:
@@ -759,7 +761,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_chist.add_argument("--limit", type=int, help="Max entries")
 
     p_cc = csub.add_parser("create", help="Create contract event")
-    p_cc.add_argument("cid", type=int, nargs="?", help="Contract ID (default: CEKI_CONTRACT_IDS[0])")
+    p_cc.add_argument(
+        "cid",
+        type=int,
+        nargs="?",
+        help="Contract ID (default: CEKI_CONTRACT_IDS[0])",
+    )
     p_cc.add_argument("--label", required=True)
     p_cc.add_argument("--type", type=int)
     p_cc.add_argument("--status", type=int)

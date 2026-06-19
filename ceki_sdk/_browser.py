@@ -259,7 +259,13 @@ class Browser:
                 "windowsVirtualKeyCode": 16, "nativeVirtualKeyCode": 16,
             }})
 
-    async def type(self, text: str, *, selector: str | None = None, human: bool | None = None) -> None:
+    async def type(
+        self,
+        text: str,
+        *,
+        selector: str | None = None,
+        human: bool | None = None,
+    ) -> None:
         # task 413 — typing humanizer moved into the extension. The SDK
         # now sends ONE Ceki.typeText command instead of N per-char
         # dispatchKeyEvent calls, so long inputs no longer burn through

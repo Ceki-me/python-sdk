@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -15,7 +14,6 @@ from ceki_sdk.contract import (
     _clean,
     contract_ids_from_env,
 )
-
 
 # ── helpers ───────────────────────────────────────────────────────
 
@@ -224,25 +222,33 @@ def test_history_tool_name():
 
 def test_poll_returns_list_directly():
     http, _ = _http_mock([{"x": 1}, {"x": 2}])
-    c = ContractClient(client=http, endpoint="http://x/mcp/agent", api_base="http://x/api", token="t")
+    c = ContractClient(
+        client=http, endpoint="http://x/mcp/agent", api_base="http://x/api", token="t"
+    )
     assert c.poll() == [{"x": 1}, {"x": 2}]
 
 
 def test_poll_unwraps_notifications_key():
     http, _ = _http_mock({"notifications": [{"a": 1}]})
-    c = ContractClient(client=http, endpoint="http://x/mcp/agent", api_base="http://x/api", token="t")
+    c = ContractClient(
+        client=http, endpoint="http://x/mcp/agent", api_base="http://x/api", token="t"
+    )
     assert c.poll() == [{"a": 1}]
 
 
 def test_poll_429_returns_empty():
     http, _ = _http_mock({"error": "rate"}, status=429)
-    c = ContractClient(client=http, endpoint="http://x/mcp/agent", api_base="http://x/api", token="t")
+    c = ContractClient(
+        client=http, endpoint="http://x/mcp/agent", api_base="http://x/api", token="t"
+    )
     assert c.poll() == []
 
 
 def test_poll_other_error_raises():
     http, _ = _http_mock({"error": "boom"}, status=500)
-    c = ContractClient(client=http, endpoint="http://x/mcp/agent", api_base="http://x/api", token="t")
+    c = ContractClient(
+        client=http, endpoint="http://x/mcp/agent", api_base="http://x/api", token="t"
+    )
     with pytest.raises(ContractError):
         c.poll()
 

@@ -10,7 +10,6 @@ from ceki_sdk.cli import build_parser
 from ceki_sdk.contract import ContractClient, ContractError
 from ceki_sdk.timelog import TimelogClient
 
-
 # ── helpers ───────────────────────────────────────────────────────
 
 

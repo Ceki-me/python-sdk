@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from unittest.mock import AsyncMock, call, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
