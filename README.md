@@ -123,28 +123,45 @@ These are NOT automated tests — they require a live relay, an online provider,
 
 ## Human Mode
 
-Browser actions can optionally include human-like timing — delays before/after actions and per-character typing with jitter.
+Behavioral humanization is **ON by default** in both `main` and `incognito` profile modes:
+
+- **Typing** — per-character keystrokes with natural inter-key cadence + jitter (extension-side, `Ceki.typeText`).
+- **Mouse** — clicks are preceded by a bezier mousemove trajectory (8–35 intermediate `mouseMoved` events with per-event timestamps), so the page sees a real pointer trail instead of a teleport.
+
+Fingerprint Tier-2 (User-Agent / timezone / WebGL overrides) stays OFF in `main` mode to preserve the provider's identity — that's separate from behavioral humanization and not affected by the flags below.
 
 ```python
-# Default: natural profile (enabled by default)
+# Default: behavioral humanizer ON (natural profile)
 browser = await client.rent(schedule_id)
 
 # Explicit profile
 browser = await client.rent(schedule_id, human="careful")
 
-# Disable humanization
+# Disable session-wide humanization
 browser = await client.rent(schedule_id, human=None)
 
 # Custom profile dict
 browser = await client.rent(schedule_id, human={"typing": {"wpm": 130}})
 ```
 
+### Per-call disable
+
+Each humanized method accepts `human=False` for raw, flat behavior on **just that call** — useful for fast scripted seeding without leaking jitter elsewhere:
+
+```python
+await browser.type("user@example.com", human=False)   # flat keystrokes, no jitter
+await browser.click(120, 240, human=False)            # straight pointer jump
+await browser.scroll(delta_y=-300, human=False)
+```
+
+The CLI equivalent is `--no-human` / `--raw` on `type`, `click`, `scroll`, `navigate`. Both flags mean "this call only".
+
 ### High-level methods
 
 ```python
 await browser.navigate("https://example.com")
 await browser.click(100, 200)
-await browser.type("Hello, world!")  # Ships one Ceki.typeText command; extension fans it out per-char (keydown/keyUp/+shift) with human delays. Long text no longer trips the relay command cap.
+await browser.type("Hello, world!")  # Ships one Ceki.typeText command; extension fans it out per-char with human delays. Long text no longer trips the relay command cap.
 await browser.scroll(delta_y=-300)
 img_bytes = await browser.screenshot()
 ```
@@ -153,14 +170,14 @@ img_bytes = await browser.screenshot()
 
 ```python
 prev = browser.set_human("careful")  # Switch profile, returns previous
-browser.set_human(None)               # Disable mid-session
+browser.set_human(None)               # Disable session-wide humanization
 ```
 
 ### Environment variables
 
 - `CEKI_HUMAN_PROFILE` — Override default profile name (e.g., `careful`)
 - `CEKI_HUMAN_PROFILE_PATH` — Path to custom JSON profile file
-- `CEKI_HUMAN_DISABLE=1` — Disable humanization entirely
+- `CEKI_HUMAN_DISABLE=1` — **Global kill-switch**: disable humanization for every call regardless of `human=...` arguments or CLI flags
 
 ## CLI
 
@@ -209,10 +226,10 @@ The CLI persists session state locally — after `rent` it saves the session ID 
 
 | Command | Description |
 |---|---|
-| `navigate SID URL` | Open URL |
-| `click SID X Y` | Click at viewport coordinates |
-| `type SID TEXT [--natural]` | Type text into focused element |
-| `scroll SID X Y DY` | Scroll from (X, Y) by `DY` pixels |
+| `navigate SID URL [--no-human\|--raw]` | Open URL (humanized by default; `--no-human` skips pre/post delays) |
+| `click SID X Y [--no-human\|--raw]` | Click at viewport coordinates (mousemove trail ON by default; `--no-human` for direct jump) |
+| `type SID TEXT [--selector CSS] [--no-human\|--raw]` | Type text (humanized by default; `--no-human` for flat keystrokes) |
+| `scroll SID X Y DY [--no-human\|--raw]` | Scroll from (X, Y) by `DY` pixels (eased by default; `--no-human` for raw CDP wheel) |
 | `screenshot SID -o FILE [--format png\|jpeg] [--full]` | Save screenshot |
 | `snapshot SID -o FILE` | Screenshot + new chat messages |
 | `switch-tab SID` | Switch active tab |
