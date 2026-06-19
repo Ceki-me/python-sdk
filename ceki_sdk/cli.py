@@ -114,11 +114,19 @@ async def _cmd_snapshot(args: argparse.Namespace) -> None:
             await client.disconnect()
 
 
+def _human_flag(args: argparse.Namespace) -> bool | None:
+    # task 427 — humanization is default ON. --no-human / --raw on the
+    # per-command parser (or root) requests raw mode for this single call.
+    if getattr(args, "no_human", False) or getattr(args, "raw", False):
+        return False
+    return None
+
+
 async def _cmd_navigate(args: argparse.Namespace) -> None:
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
-        await browser.navigate(args.url)
+        await browser.navigate(args.url, human=_human_flag(args))
         _out({"ok": True})
     finally:
         if client._ws:
@@ -129,7 +137,7 @@ async def _cmd_click(args: argparse.Namespace) -> None:
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
-        await browser.click(args.x, args.y)
+        await browser.click(args.x, args.y, human=_human_flag(args))
         _out({"ok": True, "pointer": [args.x, args.y]})
     finally:
         if client._ws:
@@ -138,12 +146,9 @@ async def _cmd_click(args: argparse.Namespace) -> None:
 
 async def _cmd_type(args: argparse.Namespace) -> None:
     api_key = _get_api_key()
-    human = "natural" if args.natural else None
     client, browser = await _resume_browser(api_key, args.session_id)
-    if human is None:
-        browser.set_human(None)
     try:
-        await browser.type(args.text, selector=args.selector)
+        await browser.type(args.text, selector=args.selector, human=_human_flag(args))
         _out({"ok": True})
     finally:
         if client._ws:
@@ -154,7 +159,7 @@ async def _cmd_scroll(args: argparse.Namespace) -> None:
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
-        await browser.scroll(args.x, args.y, delta_y=args.dy)
+        await browser.scroll(args.x, args.y, delta_y=args.dy, human=_human_flag(args))
         _out({"ok": True})
     finally:
         if client._ws:
@@ -571,6 +576,13 @@ async def _cmd_cdp(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ceki", description="CLI for browser.ceki.me rental")
+    parser.add_argument(
+        "--no-human", "--raw",
+        action="store_true",
+        dest="no_human",
+        help="Disable behavioral humanization (mouse jitter, typing cadence) "
+             "for this command. Same as CEKI_HUMAN_DISABLE=1 but per-call.",
+    )
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -589,16 +601,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_nav = sub.add_parser("navigate", help="Navigate to URL")
     p_nav.add_argument("session_id", help="Session ID")
     p_nav.add_argument("url", help="URL to navigate to")
+    p_nav.add_argument("--no-human", "--raw", action="store_true", dest="no_human",
+                       help="Skip humanization for this call")
 
     p_click = sub.add_parser("click", help="Click at coordinates")
     p_click.add_argument("session_id", help="Session ID")
     p_click.add_argument("x", type=int, help="X coordinate")
     p_click.add_argument("y", type=int, help="Y coordinate")
+    p_click.add_argument("--no-human", "--raw", action="store_true", dest="no_human",
+                         help="Skip humanization (mouse jitter) for this call")
 
     p_type = sub.add_parser("type", help="Type text")
     p_type.add_argument("session_id", help="Session ID")
     p_type.add_argument("text", help="Text to type")
-    p_type.add_argument("--natural", action="store_true", help="Enable human-like typing")
+    # task 427 — humanization is now the default. --natural is kept as a
+    # silent no-op for backwards compatibility.
+    p_type.add_argument("--natural", action="store_true",
+                        help=argparse.SUPPRESS)
+    p_type.add_argument("--no-human", "--raw", action="store_true", dest="no_human",
+                        help="Skip humanization (typing cadence) for this call")
     p_type.add_argument(
         "--selector",
         help="CSS selector to focus before typing (e.g. 'input[type=email]')",
@@ -609,6 +630,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_scroll.add_argument("x", type=int, help="X origin")
     p_scroll.add_argument("y", type=int, help="Y origin")
     p_scroll.add_argument("dy", type=int, help="Delta Y (negative = scroll down)")
+    p_scroll.add_argument("--no-human", "--raw", action="store_true", dest="no_human",
+                          help="Skip humanization for this call")
 
     p_chat = sub.add_parser("chat", help="Chat with provider")
     p_chat.add_argument("session_id", help="Session ID")

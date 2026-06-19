@@ -191,28 +191,43 @@ class Browser:
     # High-level browser actions (with optional human-like timing)
     # ──────────────────────────────────────────────────────────────────────────
 
-    async def navigate(self, url: str, *, timeout: float = 30.0) -> dict:
-        if self._humanizer:
-            await self._humanizer.before("navigate")
+    def _humanize_for_call(self, human: bool | None) -> "Humanizer | None":
+        # task 427 — per-call kill-switch. human=False bypasses humanizer
+        # (timings) AND tells the extension to skip mouse-jitter via the
+        # `_ceki_raw` param marker (see cdp.ts in ceki-browser-extension).
+        # human=None → use session default (env / constructor). human=True
+        # forces humanizer even if global env disabled it (corner case;
+        # respects None humanizer if no profile).
+        if human is False:
+            return None
+        return self._humanizer
+
+    async def navigate(self, url: str, *, timeout: float = 30.0, human: bool | None = None) -> dict:
+        h = self._humanize_for_call(human)
+        if h:
+            await h.before("navigate")
         result = await self.send(
             {"method": "Page.navigate", "params": {"url": url}}, timeout=timeout,
         )
-        if self._humanizer:
-            await self._humanizer.after("navigate")
+        if h:
+            await h.after("navigate")
         return result
 
-    async def click(self, x: int | float, y: int | float) -> None:
-        if self._humanizer:
-            await self._humanizer.before("click")
+    async def click(self, x: int | float, y: int | float, *, human: bool | None = None) -> None:
+        h = self._humanize_for_call(human)
+        if h:
+            await h.before("click")
+        raw_flag = {"_ceki_raw": True} if h is None else {}
         await self.send({"method": "Input.dispatchMouseEvent", "params": {
             "type": "mousePressed", "x": int(x), "y": int(y), "button": "left", "clickCount": 1,
+            **raw_flag,
         }})
         await self.send({"method": "Input.dispatchMouseEvent", "params": {
             "type": "mouseReleased", "x": int(x), "y": int(y), "button": "left", "clickCount": 1,
         }})
         self._last_pointer = (int(x), int(y))
-        if self._humanizer:
-            await self._humanizer.after("click")
+        if h:
+            await h.after("click")
 
     async def _send_keystroke(self, char: str) -> None:
         from .humanize.keymap import keymap_for_char
@@ -244,7 +259,7 @@ class Browser:
                 "windowsVirtualKeyCode": 16, "nativeVirtualKeyCode": 16,
             }})
 
-    async def type(self, text: str, *, selector: str | None = None) -> None:
+    async def type(self, text: str, *, selector: str | None = None, human: bool | None = None) -> None:
         # task 413 — typing humanizer moved into the extension. The SDK
         # now sends ONE Ceki.typeText command instead of N per-char
         # dispatchKeyEvent calls, so long inputs no longer burn through
@@ -258,7 +273,8 @@ class Browser:
         # because Chrome routed the bare CDP eval to the page's service-worker
         # execution context where `document` is undefined. chrome.scripting
         # always lands in a page frame.
-        if self._humanizer:
+        h = self._humanize_for_call(human)
+        if h:
             if self._last_pointer is not None and selector is None:
                 await self.click(*self._last_pointer)
             elif selector is None:
@@ -266,33 +282,35 @@ class Browser:
                     "type() called with humanizer but no last_pointer;"
                     " input may not land on the intended element"
                 )
-            await self._humanizer.before("type")
+            await h.before("type")
 
-        human: str | None = None
-        if self._humanizer and self._humanizer.profile:
-            name = self._humanizer.profile.name
-            human = name if name in ("natural", "careful") else "natural"
+        human_name: str | None = None
+        if h and h.profile:
+            name = h.profile.name
+            human_name = name if name in ("natural", "careful") else "natural"
 
-        params: dict[str, Any] = {"text": text, "human": human}
+        params: dict[str, Any] = {"text": text, "human": human_name}
         if selector is not None:
             params["selector"] = selector
 
         await self.send({"method": "Ceki.typeText", "params": params})
 
-        if self._humanizer:
-            await self._humanizer.after("type")
+        if h:
+            await h.after("type")
 
     async def scroll(
-        self, x: int = 0, y: int = 0, *, delta_x: int = 0, delta_y: int = -300
+        self, x: int = 0, y: int = 0, *, delta_x: int = 0, delta_y: int = -300,
+        human: bool | None = None,
     ) -> None:
-        if self._humanizer:
-            await self._humanizer.before("scroll")
+        h = self._humanize_for_call(human)
+        if h:
+            await h.before("scroll")
         await self.send({"method": "Input.dispatchMouseEvent", "params": {
             "type": "mouseWheel", "x": x, "y": y, "deltaX": delta_x, "deltaY": delta_y,
         }})
         self._last_pointer = (int(x), int(y))
-        if self._humanizer:
-            await self._humanizer.after("scroll")
+        if h:
+            await h.after("scroll")
 
     async def screenshot(
         self,
