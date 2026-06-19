@@ -145,23 +145,14 @@ async def _cmd_click(args: argparse.Namespace) -> None:
 
 
 async def _cmd_type(args: argparse.Namespace) -> None:
-    # task 428 BUG-B — `ceki type` semantics differ from the rest of the
-    # CLI: typing humanization is OPT-IN per call.
-    #   --natural          → humanizer ON (natural profile)
-    #   default | --no-human | --raw → humanizer OFF (flat keystrokes)
-    # Rationale: typing visibly slows scripted flows and QA / agents need
-    # a fast default that can be opted into per call, vs. mouse / scroll
-    # where humanization is cheap and ON by default (task 427).
+    # task 429 — typing is humanized BY DEFAULT in both modes (revert of
+    # task 428 opt-in). --no-human / --raw → explicit flat for THIS call
+    # only (the real BUG-B fix: stop the leak, but keep default-ON).
+    # --natural is a no-op alias kept for backwards compatibility.
     api_key = _get_api_key()
-    if getattr(args, "no_human", False) or getattr(args, "raw", False):
-        human: bool | None = False
-    elif getattr(args, "natural", False):
-        human = None  # SDK default ("natural" profile)
-    else:
-        human = False
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
-        await browser.type(args.text, selector=args.selector, human=human)
+        await browser.type(args.text, selector=args.selector, human=_human_flag(args))
         _out({"ok": True})
     finally:
         if client._ws:
@@ -627,15 +618,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_type = sub.add_parser("type", help="Type text")
     p_type.add_argument("session_id", help="Session ID")
     p_type.add_argument("text", help="Text to type")
-    # task 428 BUG-B — `type` is the one path where humanization is OPT-IN.
-    # Default = flat keystrokes (fast). --natural turns on the typing
-    # cadence humanizer for this call. --no-human / --raw is accepted as
-    # an explicit synonym of the default (kept for symmetry with click /
-    # scroll / navigate where humanization is default ON).
+    # task 429 — typing is humanized BY DEFAULT in both modes (revert of
+    # 428 opt-in). --no-human / --raw explicitly flattens THIS call only.
+    # --natural is a no-op alias kept for backwards compatibility.
     p_type.add_argument("--natural", action="store_true",
-                        help="Humanize typing cadence (natural profile) for this call")
+                        help=argparse.SUPPRESS)
     p_type.add_argument("--no-human", "--raw", action="store_true", dest="no_human",
-                        help="Explicit: flat keystrokes (same as default; symmetry with other commands)")
+                        help="Skip humanization (typing cadence) for this call")
     p_type.add_argument(
         "--selector",
         help="CSS selector to focus before typing (e.g. 'input[type=email]')",

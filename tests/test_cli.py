@@ -98,30 +98,29 @@ def test_parser_type_no_human():
     assert args.no_human is True
 
 
-# task 428 BUG-B — `ceki type` is OPT-IN for humanization. Default + explicit
-# --no-human → flat keystrokes (human=False). --natural → SDK default
-# humanizer (human=None).
+# task 429 — typing humanized BY DEFAULT (revert of 428 opt-in).
+# Default + --natural → human=None (SDK humanizer ON).
+# --no-human / --raw → human=False (explicit flat for THIS call only).
+# --natural is a no-op alias, not a switch.
 
 def _resolve_type_human(args):
-    """Mirror of cli._cmd_type humanization branch, for test isolation."""
+    """Mirror of cli._human_flag for `ceki type` post-429."""
     if getattr(args, "no_human", False) or getattr(args, "raw", False):
         return False
-    if getattr(args, "natural", False):
-        return None
-    return False
+    return None
 
 
-def test_type_default_is_off():
+def test_type_default_is_humanized():
     a = build_parser().parse_args(["type", "ses-1", "hi"])
-    assert _resolve_type_human(a) is False
+    assert _resolve_type_human(a) is None
 
 
-def test_type_natural_uses_sdk_default():
+def test_type_natural_is_noop_default_remains_on():
     a = build_parser().parse_args(["type", "ses-1", "hi", "--natural"])
     assert _resolve_type_human(a) is None
 
 
-def test_type_no_human_explicit_off():
+def test_type_no_human_explicit_flat():
     a = build_parser().parse_args(["type", "ses-1", "hi", "--no-human"])
     assert _resolve_type_human(a) is False
 
