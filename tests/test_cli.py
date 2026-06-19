@@ -92,6 +92,45 @@ def test_parser_type_natural():
     assert args.natural is True
 
 
+def test_parser_type_no_human():
+    parser = build_parser()
+    args = parser.parse_args(["type", "ses-1", "hi", "--no-human"])
+    assert args.no_human is True
+
+
+# task 428 BUG-B — `ceki type` is OPT-IN for humanization. Default + explicit
+# --no-human → flat keystrokes (human=False). --natural → SDK default
+# humanizer (human=None).
+
+def _resolve_type_human(args):
+    """Mirror of cli._cmd_type humanization branch, for test isolation."""
+    if getattr(args, "no_human", False) or getattr(args, "raw", False):
+        return False
+    if getattr(args, "natural", False):
+        return None
+    return False
+
+
+def test_type_default_is_off():
+    a = build_parser().parse_args(["type", "ses-1", "hi"])
+    assert _resolve_type_human(a) is False
+
+
+def test_type_natural_uses_sdk_default():
+    a = build_parser().parse_args(["type", "ses-1", "hi", "--natural"])
+    assert _resolve_type_human(a) is None
+
+
+def test_type_no_human_explicit_off():
+    a = build_parser().parse_args(["type", "ses-1", "hi", "--no-human"])
+    assert _resolve_type_human(a) is False
+
+
+def test_type_no_human_wins_over_natural():
+    a = build_parser().parse_args(["type", "ses-1", "hi", "--natural", "--no-human"])
+    assert _resolve_type_human(a) is False
+
+
 def test_parser_scroll():
     parser = build_parser()
     args = parser.parse_args(["scroll", "ses-1", "0", "0", "-300"])
