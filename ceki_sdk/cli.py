@@ -480,6 +480,8 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     description=args.desc,
                     data=data_obj,
                     benefitable=args.benefitable,
+                    reviewer=args.reviewer,
+                    qa=args.qa,
                 ))
             elif action == "comment":
                 _contract_dump(cli.comment(
@@ -779,6 +781,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_cc.add_argument("--amount", type=int)
     p_cc.add_argument("--currency")
     p_cc.add_argument("--benefitable", help="agent:8 or user:61")
+    p_cc.add_argument("--reviewer", help="agent:8 or user:61")
+    p_cc.add_argument("--qa", help="agent:8 or user:61")
     p_cc.add_argument("--desc")
     p_cc.add_argument("--data", help="Extra JSON object passed through as `data`")
 

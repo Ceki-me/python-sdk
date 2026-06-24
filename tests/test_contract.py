@@ -379,3 +379,45 @@ def test_parser_propose_start_end_date():
         "--start", "s", "--end", "e", "--date", "d",
     ])
     assert a.start == "s" and a.end == "e" and a.date == "d"
+
+
+# ── reviewer / qa on create (task 2465) ───────────────────────────
+
+
+def test_create_reviewer_only():
+    http, _ = _http_mock(_mcp_text({"id": 1}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.create(14, label="L", reviewer="agent:9")
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["reviewer"] == {"type": "agent", "value": 9}
+    assert "qa" not in args
+
+
+def test_create_qa_only():
+    http, _ = _http_mock(_mcp_text({"id": 1}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.create(14, label="L", qa="user:42")
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["qa"] == {"type": "user", "value": 42}
+    assert "reviewer" not in args
+
+
+def test_create_reviewer_and_qa():
+    http, _ = _http_mock(_mcp_text({"id": 1}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.create(14, label="L", reviewer="agent:9", qa="agent:12")
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["reviewer"] == {"type": "agent", "value": 9}
+    assert args["qa"] == {"type": "agent", "value": 12}
+
+
+def test_parser_create_reviewer_and_qa():
+    a = build_parser().parse_args([
+        "contract", "create", "14", "--label", "X",
+        "--benefitable", "agent:8",
+        "--reviewer", "agent:9",
+        "--qa", "agent:12",
+    ])
+    assert a.benefitable == "agent:8"
+    assert a.reviewer == "agent:9"
+    assert a.qa == "agent:12"

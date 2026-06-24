@@ -206,6 +206,8 @@ class ContractClient:
         description: str | None = None,
         data: dict[str, Any] | None = None,
         benefitable: str | None = None,
+        reviewer: str | None = None,
+        qa: str | None = None,
     ) -> Any:
         args = _clean({
             "contract_id": int(contract_id),
@@ -223,6 +225,8 @@ class ContractClient:
             "description": description,
             "data": data,
             "benefitable": _benefitable(benefitable),
+            "reviewer": _benefitable(reviewer),
+            "qa": _benefitable(qa),
         })
         return self.call(_TOOL_MAP["create"], args)
 
