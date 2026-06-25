@@ -332,7 +332,10 @@ class ContractClient:
         status_result: Any = None
         if status is not None:
             status_result = self.propose(event_id, status_id=int(status))
-        comment_result = self.comment(event_id, description=desc)
+        # Backend requires `label` on comment events — derive a short one
+        # from the desc (server-side validation rejects label-less comments).
+        label = (desc or "").strip().splitlines()[0][:60] or "progress"
+        comment_result = self.comment(event_id, label=label, description=desc)
         return {"status_correction": status_result, "comment": comment_result}
 
     def vote(self, event_id: int, ids: list[int], vote: bool) -> Any:

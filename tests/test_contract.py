@@ -516,7 +516,7 @@ def test_progress_calls_propose_then_comment(monkeypatch):
     assert calls[0][1] == (99,)
     assert calls[0][2] == {"status_id": 222}
     assert calls[1][1] == (99,)
-    assert calls[1][2] == {"description": "r"}
+    assert calls[1][2] == {"label": "r", "description": "r"}
     assert result == {
         "status_correction": {"applied": True, "id": 1},
         "comment": {"id": 2},
@@ -543,7 +543,7 @@ def test_progress_without_status_only_comments(monkeypatch):
     result = c.progress(99, desc="just an update")
 
     assert propose_calls == []
-    assert comment_calls == [(99, {"description": "just an update"})]
+    assert comment_calls == [(99, {"label": "just an update", "description": "just an update"})]
     assert result == {"status_correction": None, "comment": {"id": 7}}
 
 
@@ -568,6 +568,30 @@ def test_progress_never_passes_desc_to_propose(monkeypatch):
     assert "desc" not in propose_kwargs
     assert "description" not in propose_kwargs
     assert "label" not in propose_kwargs
+
+
+def test_progress_label_derived_from_desc(monkeypatch):
+    """Backend requires label on comments — progress should derive one from desc."""
+    c = ContractClient(endpoint="http://x/mcp/agent", token="t")
+    comment_kwargs: dict = {}
+
+    def fake_propose(self, event_id, **kw):
+        return {"applied": True}
+
+    def fake_comment(self, event_id, **kw):
+        comment_kwargs.update(kw)
+        return {"id": 1}
+
+    monkeypatch.setattr(ContractClient, "propose", fake_propose)
+    monkeypatch.setattr(ContractClient, "comment", fake_comment)
+
+    long_desc = "x" * 200 + "\nsecond line"
+    c.progress(99, desc=long_desc)
+
+    assert "label" in comment_kwargs
+    assert len(comment_kwargs["label"]) <= 60
+    assert comment_kwargs["label"] == "x" * 60
+    assert comment_kwargs["description"] == long_desc
 
 
 def test_parser_progress_full():
