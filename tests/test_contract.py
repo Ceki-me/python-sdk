@@ -381,34 +381,60 @@ def test_parser_propose_start_end_date():
     assert a.start == "s" and a.end == "e" and a.date == "d"
 
 
-# ── reviewer / qa on create (task 2465) ───────────────────────────
+# ── participants[] payload on create (task 2494, back/2485) ───────
 
 
-def test_create_reviewer_only():
+def test_create_reviewer_folds_into_participants():
     http, _ = _http_mock(_mcp_text({"id": 1}))
     c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
     c.create(14, label="L", reviewer="agent:9")
     args = _captured_body(http)["params"]["arguments"]
-    assert args["reviewer"] == {"type": "agent", "value": 9}
+    assert args["participants"] == [{"value": 9, "type": "agent", "role_id": 5}]
+    assert "reviewer" not in args
     assert "qa" not in args
 
 
-def test_create_qa_only():
+def test_create_qa_folds_into_participants():
     http, _ = _http_mock(_mcp_text({"id": 1}))
     c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
     c.create(14, label="L", qa="user:42")
     args = _captured_body(http)["params"]["arguments"]
-    assert args["qa"] == {"type": "user", "value": 42}
+    assert args["participants"] == [{"value": 42, "type": "user", "role_id": 6}]
     assert "reviewer" not in args
+    assert "qa" not in args
 
 
-def test_create_reviewer_and_qa():
+def test_create_reviewer_and_qa_both_in_participants():
     http, _ = _http_mock(_mcp_text({"id": 1}))
     c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
     c.create(14, label="L", reviewer="agent:9", qa="agent:12")
     args = _captured_body(http)["params"]["arguments"]
-    assert args["reviewer"] == {"type": "agent", "value": 9}
-    assert args["qa"] == {"type": "agent", "value": 12}
+    assert "reviewer" not in args
+    assert "qa" not in args
+    by_role = {p["role_id"]: p for p in args["participants"]}
+    assert by_role[5] == {"value": 9, "type": "agent", "role_id": 5}
+    assert by_role[6] == {"value": 12, "type": "agent", "role_id": 6}
+    assert len(args["participants"]) == 2
+
+
+def test_create_no_reviewer_no_qa_omits_participants():
+    http, _ = _http_mock(_mcp_text({"id": 1}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.create(14, label="L", benefitable="agent:8")
+    args = _captured_body(http)["params"]["arguments"]
+    assert "participants" not in args
+    assert "reviewer" not in args
+    assert "qa" not in args
+    assert args["benefitable"] == {"type": "agent", "value": 8}
+
+
+def test_create_benefitable_and_billable_stay_top_level():
+    http, _ = _http_mock(_mcp_text({"id": 1}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.create(14, label="L", benefitable="agent:8", reviewer="agent:9")
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["benefitable"] == {"type": "agent", "value": 8}
+    assert args["participants"] == [{"value": 9, "type": "agent", "role_id": 5}]
 
 
 def test_parser_create_reviewer_and_qa():
@@ -421,3 +447,62 @@ def test_parser_create_reviewer_and_qa():
     assert a.benefitable == "agent:8"
     assert a.reviewer == "agent:9"
     assert a.qa == "agent:12"
+
+
+def test_parser_create_participant_repeated():
+    a = build_parser().parse_args([
+        "contract", "create", "14", "--label", "X",
+        "--participant", "agent:5:reviewer",
+        "--participant", "user:7:qa",
+    ])
+    assert a.participant == ["agent:5:reviewer", "user:7:qa"]
+
+
+def test_parse_participant_reviewer_shortcut():
+    from ceki_sdk.cli import _parse_participant
+    assert _parse_participant("agent:5:reviewer") == {
+        "value": 5, "type": "agent", "role_id": 5,
+    }
+
+
+def test_parse_participant_qa_shortcut():
+    from ceki_sdk.cli import _parse_participant
+    assert _parse_participant("user:7:qa") == {
+        "value": 7, "type": "user", "role_id": 6,
+    }
+
+
+def test_parse_participant_numeric_role():
+    from ceki_sdk.cli import _parse_participant
+    assert _parse_participant("agent:5:role:42") == {
+        "value": 5, "type": "agent", "role_id": 42,
+    }
+
+
+def test_parse_participant_unknown_role_raises():
+    from ceki_sdk.cli import _parse_participant
+    with pytest.raises(ValueError, match="unknown role"):
+        _parse_participant("agent:5:bogus")
+
+
+def test_parse_participant_bad_type_raises():
+    from ceki_sdk.cli import _parse_participant
+    with pytest.raises(ValueError, match="type"):
+        _parse_participant("robot:5:reviewer")
+
+
+def test_create_reviewer_plus_participant_stacks():
+    """--reviewer agent:9 + --participant agent:5:reviewer → two role_id=5 entries."""
+    http, _ = _http_mock(_mcp_text({"id": 1}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.create(
+        14, label="L",
+        reviewer="agent:9",
+        participants=[{"value": 5, "type": "agent", "role_id": 5}],
+    )
+    args = _captured_body(http)["params"]["arguments"]
+    parts = args["participants"]
+    assert len(parts) == 2
+    assert all(p["role_id"] == 5 for p in parts)
+    values = sorted(p["value"] for p in parts)
+    assert values == [5, 9]

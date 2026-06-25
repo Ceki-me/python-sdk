@@ -420,6 +420,50 @@ def _contract_client():
     return ContractClient()
 
 
+def _parse_participant(spec: str) -> dict[str, Any]:
+    """Parse 'agent:5:reviewer' / 'user:7:qa' / 'agent:5:role:42'.
+
+    Returns {value: int, type: 'agent'|'user', role_id: int}.
+    """
+    from .contract import ROLE_QA, ROLE_REVIEWER
+
+    if not spec or not isinstance(spec, str):
+        raise ValueError(f"--participant must be a non-empty string, got: {spec!r}")
+    parts = spec.split(":")
+    if len(parts) < 3:
+        raise ValueError(
+            f"--participant must be 'type:id:role' (e.g. agent:5:reviewer), got: {spec!r}"
+        )
+    ptype, pid, role, *rest = parts
+    if ptype not in ("agent", "user"):
+        raise ValueError(f"--participant type must be 'agent' or 'user', got: {ptype!r}")
+    try:
+        value = int(pid)
+    except ValueError as e:
+        raise ValueError(f"--participant id must be int, got: {pid!r}") from e
+
+    role_map = {"reviewer": ROLE_REVIEWER, "qa": ROLE_QA}
+    if role in role_map:
+        role_id = role_map[role]
+    elif role == "role":
+        if not rest:
+            raise ValueError(
+                f"--participant 'role:NUMBER' needs a number, got: {spec!r}"
+            )
+        try:
+            role_id = int(rest[0])
+        except ValueError as e:
+            raise ValueError(
+                f"--participant role id must be int, got: {rest[0]!r}"
+            ) from e
+    else:
+        raise ValueError(
+            f"--participant unknown role {role!r}; expected 'reviewer', 'qa', "
+            f"or 'role:NUMBER'"
+        )
+    return {"value": value, "type": ptype, "role_id": role_id}
+
+
 def _contract_dump(value: Any) -> None:
     if isinstance(value, str):
         sys.stdout.write(value)
@@ -464,6 +508,14 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     _err("contract id required (positional or CEKI_CONTRACT_IDS)", "args")
                     return 1
                 data_obj = json.loads(args.data) if args.data else None
+                try:
+                    extra_parts = [
+                        _parse_participant(spec)
+                        for spec in (getattr(args, "participant", None) or [])
+                    ]
+                except ValueError as e:
+                    _err(str(e), "args")
+                    return 1
                 _contract_dump(cli.create(
                     cid,
                     label=args.label,
@@ -482,6 +534,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     benefitable=args.benefitable,
                     reviewer=args.reviewer,
                     qa=args.qa,
+                    participants=extra_parts or None,
                 ))
             elif action == "comment":
                 _contract_dump(cli.comment(
@@ -781,8 +834,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_cc.add_argument("--amount", type=int)
     p_cc.add_argument("--currency")
     p_cc.add_argument("--benefitable", help="agent:8 or user:61")
-    p_cc.add_argument("--reviewer", help="agent:8 or user:61")
-    p_cc.add_argument("--qa", help="agent:8 or user:61")
+    p_cc.add_argument("--reviewer", help="agent:8 or user:61 (role_id 5 shortcut)")
+    p_cc.add_argument("--qa", help="agent:8 or user:61 (role_id 6 shortcut)")
+    p_cc.add_argument(
+        "--participant",
+        action="append",
+        default=[],
+        dest="participant",
+        help=(
+            "Repeatable. agent:N:reviewer | user:N:qa | agent:N:role:NUMBER. "
+            "Stacks on top of --reviewer/--qa."
+        ),
+    )
     p_cc.add_argument("--desc")
     p_cc.add_argument("--data", help="Extra JSON object passed through as `data`")
 

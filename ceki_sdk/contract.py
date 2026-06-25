@@ -11,6 +11,10 @@ import httpx
 
 from ._config import default_api_url
 
+# Contract role IDs (back/2485 participants[] payload).
+ROLE_REVIEWER = 5
+ROLE_QA = 6
+
 
 def _benefitable(value: str | None) -> dict[str, Any] | None:
     if not value:
@@ -20,6 +24,14 @@ def _benefitable(value: str | None) -> dict[str, Any] | None:
         raise ValueError(f"benefitable must be 'type:id', got: {value!r}")
     btype, bid = parts
     return {"type": btype, "value": int(bid)}
+
+
+def _participant(value: str | None, role_id: int) -> dict[str, Any] | None:
+    """Parse 'agent:8' / 'user:61' into {value, type, role_id}."""
+    base = _benefitable(value)
+    if base is None:
+        return None
+    return {"value": base["value"], "type": base["type"], "role_id": role_id}
 
 
 def _clean(args: dict[str, Any]) -> dict[str, Any]:
@@ -208,7 +220,19 @@ class ContractClient:
         benefitable: str | None = None,
         reviewer: str | None = None,
         qa: str | None = None,
+        participants: list[dict[str, Any]] | None = None,
     ) -> Any:
+        # back/2485: reviewer/qa now live inside participants[].
+        all_participants: list[dict[str, Any]] = []
+        rev = _participant(reviewer, ROLE_REVIEWER)
+        if rev is not None:
+            all_participants.append(rev)
+        qa_p = _participant(qa, ROLE_QA)
+        if qa_p is not None:
+            all_participants.append(qa_p)
+        if participants:
+            all_participants.extend(participants)
+
         args = _clean({
             "contract_id": int(contract_id),
             "label": label,
@@ -225,8 +249,7 @@ class ContractClient:
             "description": description,
             "data": data,
             "benefitable": _benefitable(benefitable),
-            "reviewer": _benefitable(reviewer),
-            "qa": _benefitable(qa),
+            "participants": all_participants if all_participants else None,
         })
         return self.call(_TOOL_MAP["create"], args)
 
