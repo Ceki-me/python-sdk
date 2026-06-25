@@ -391,7 +391,7 @@ def test_create_reviewer_folds_into_users():
     c.create(14, label="L", reviewer="agent:9")
     args = _captured_body(http)["params"]["arguments"]
     assert args["users"] == [
-        {"participable_id": 9, "participable_type": "App\\Models\\Agent", "role_id": 5}
+        {"participable_id": 9, "type": "agent", "role_id": 5}
     ]
     assert "reviewer" not in args
     assert "qa" not in args
@@ -404,7 +404,7 @@ def test_create_qa_folds_into_users():
     c.create(14, label="L", qa="user:42")
     args = _captured_body(http)["params"]["arguments"]
     assert args["users"] == [
-        {"participable_id": 42, "participable_type": "App\\Models\\User", "role_id": 6}
+        {"participable_id": 42, "type": "user", "role_id": 6}
     ]
     assert "reviewer" not in args
     assert "qa" not in args
@@ -421,10 +421,10 @@ def test_create_reviewer_and_qa_both_in_users():
     assert "participants" not in args
     by_role = {p["role_id"]: p for p in args["users"]}
     assert by_role[5] == {
-        "participable_id": 9, "participable_type": "App\\Models\\Agent", "role_id": 5,
+        "participable_id": 9, "type": "agent", "role_id": 5,
     }
     assert by_role[6] == {
-        "participable_id": 12, "participable_type": "App\\Models\\Agent", "role_id": 6,
+        "participable_id": 12, "type": "agent", "role_id": 6,
     }
     assert len(args["users"]) == 2
 
@@ -447,16 +447,16 @@ def test_create_users_uses_participable_id_keys():
     for p in parts:
         # correct keys present
         assert "participable_id" in p
-        assert "participable_type" in p
+        assert "type" in p
         assert "role_id" in p
         # forbidden legacy keys absent
         assert "value" not in p
-        assert "type" not in p
+        assert "participable_type" not in p
     by_role = {p["role_id"]: p for p in parts}
     assert by_role[5]["participable_id"] == 9
-    assert by_role[5]["participable_type"] == "App\\Models\\Agent"
+    assert by_role[5]["type"] == "agent"
     assert by_role[6]["participable_id"] == 12
-    assert by_role[6]["participable_type"] == "App\\Models\\Agent"
+    assert by_role[6]["type"] == "agent"
 
 
 def test_create_uses_users_field_not_participants():
@@ -494,7 +494,7 @@ def test_create_benefitable_and_billable_stay_top_level():
     # benefitable is a different parser — stays {type, value}.
     assert args["benefitable"] == {"type": "agent", "value": 8}
     assert args["users"] == [
-        {"participable_id": 9, "participable_type": "App\\Models\\Agent", "role_id": 5}
+        {"participable_id": 9, "type": "agent", "role_id": 5}
     ]
     assert "participants" not in args
 
@@ -523,21 +523,21 @@ def test_parser_create_participant_repeated():
 def test_parse_participant_reviewer_shortcut():
     from ceki_sdk.cli import _parse_participant
     assert _parse_participant("agent:5:reviewer") == {
-        "participable_id": 5, "participable_type": "App\\Models\\Agent", "role_id": 5,
+        "participable_id": 5, "type": "agent", "role_id": 5,
     }
 
 
 def test_parse_participant_qa_shortcut():
     from ceki_sdk.cli import _parse_participant
     assert _parse_participant("user:7:qa") == {
-        "participable_id": 7, "participable_type": "App\\Models\\User", "role_id": 6,
+        "participable_id": 7, "type": "user", "role_id": 6,
     }
 
 
 def test_parse_participant_numeric_role():
     from ceki_sdk.cli import _parse_participant
     assert _parse_participant("agent:5:role:42") == {
-        "participable_id": 5, "participable_type": "App\\Models\\Agent", "role_id": 42,
+        "participable_id": 5, "type": "agent", "role_id": 42,
     }
 
 
@@ -723,7 +723,7 @@ def test_create_reviewer_plus_participant_stacks():
         14, label="L",
         reviewer="agent:9",
         participants=[
-            {"participable_id": 5, "participable_type": "App\\Models\\Agent", "role_id": 5}
+            {"participable_id": 5, "type": "agent", "role_id": 5}
         ],
     )
     args = _captured_body(http)["params"]["arguments"]

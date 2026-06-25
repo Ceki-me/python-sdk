@@ -26,30 +26,22 @@ def _benefitable(value: str | None) -> dict[str, Any] | None:
     return {"type": btype, "value": int(bid)}
 
 
-_PARTICIPABLE_FQCN = {
-    "agent": "App\\Models\\Agent",
-    "user": "App\\Models\\User",
-}
-
-
 def _participant(value: str | None, role_id: int) -> dict[str, Any] | None:
-    """Parse 'agent:8' / 'user:61' into {participable_id, participable_type, role_id}.
+    """Parse 'agent:8' / 'user:61' into {participable_id, type, role_id}.
 
-    Wire shape required by EventController users[] validation rules
-    (back/2542 renamed the array key from `participants` to `users`;
-    element shape unchanged): `participable_id` + `participable_type` +
-    `role_id`. The validator accepts the short tokens `agent` / `user`,
-    but the membership lookup compares the string to the contract
-    members' `participable_type` column, which stores the fully-qualified
-    class name. Sending the short token leads to the misleading 422
-    "Participant must be a member of the contract"; we send the FQCN.
+    Wire shape declared by the create-contract-event MCP tool schema:
+    `participable_id` + `type` (short token: 'agent' or 'user') +
+    `role_id`. The MCP tool drops any field it does not know about, so
+    sending `participable_type` (FQCN) silently loses the type and the
+    backend membership lookup defaults to user → misleading 422
+    "Participant must be a member of the contract". Send `type`.
     """
     base = _benefitable(value)
     if base is None:
         return None
     return {
         "participable_id": base["value"],
-        "participable_type": _PARTICIPABLE_FQCN[base["type"]],
+        "type": base["type"],
         "role_id": role_id,
     }
 

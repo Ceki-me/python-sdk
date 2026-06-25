@@ -465,10 +465,9 @@ def _parse_participant(spec: str) -> dict[str, Any]:
             f"--participant unknown role {role!r}; expected 'reviewer', 'qa', "
             f"or 'role:NUMBER'"
         )
-    from .contract import _PARTICIPABLE_FQCN
     return {
         "participable_id": value,
-        "participable_type": _PARTICIPABLE_FQCN[ptype],
+        "type": ptype,
         "role_id": role_id,
     }
 
