@@ -381,59 +381,64 @@ def test_parser_propose_start_end_date():
     assert a.start == "s" and a.end == "e" and a.date == "d"
 
 
-# ── participants[] payload on create (task 2494, back/2485) ───────
+# ── users[] payload on create (task 2494, back/2542 — renamed from
+#    participants[]) ────────────────────────────────────────────────
 
 
-def test_create_reviewer_folds_into_participants():
+def test_create_reviewer_folds_into_users():
     http, _ = _http_mock(_mcp_text({"id": 1}))
     c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
     c.create(14, label="L", reviewer="agent:9")
     args = _captured_body(http)["params"]["arguments"]
-    assert args["participants"] == [
+    assert args["users"] == [
         {"participable_id": 9, "participable_type": "agent", "role_id": 5}
     ]
     assert "reviewer" not in args
     assert "qa" not in args
+    assert "participants" not in args
 
 
-def test_create_qa_folds_into_participants():
+def test_create_qa_folds_into_users():
     http, _ = _http_mock(_mcp_text({"id": 1}))
     c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
     c.create(14, label="L", qa="user:42")
     args = _captured_body(http)["params"]["arguments"]
-    assert args["participants"] == [
+    assert args["users"] == [
         {"participable_id": 42, "participable_type": "user", "role_id": 6}
     ]
     assert "reviewer" not in args
     assert "qa" not in args
+    assert "participants" not in args
 
 
-def test_create_reviewer_and_qa_both_in_participants():
+def test_create_reviewer_and_qa_both_in_users():
     http, _ = _http_mock(_mcp_text({"id": 1}))
     c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
     c.create(14, label="L", reviewer="agent:9", qa="agent:12")
     args = _captured_body(http)["params"]["arguments"]
     assert "reviewer" not in args
     assert "qa" not in args
-    by_role = {p["role_id"]: p for p in args["participants"]}
+    assert "participants" not in args
+    by_role = {p["role_id"]: p for p in args["users"]}
     assert by_role[5] == {"participable_id": 9, "participable_type": "agent", "role_id": 5}
     assert by_role[6] == {"participable_id": 12, "participable_type": "agent", "role_id": 6}
-    assert len(args["participants"]) == 2
+    assert len(args["users"]) == 2
 
 
-def test_create_participants_uses_participable_id_keys():
-    """Regression guard for the 422 wire-format bug.
+def test_create_users_uses_participable_id_keys():
+    """Regression guard for the 422 element-shape bug.
 
-    EventController participants[] validation requires `participable_id` +
-    `participable_type` keys. The earlier shape {value, type, role_id}
-    was rejected with HTTP 422
-    (`participants.0.participable_id field is required`). This test pins
-    the correct shape so the bug can't sneak back.
+    EventController users[] validation (back/2542; previously named
+    participants[]) requires `participable_id` + `participable_type` +
+    `role_id` keys on each element. The earlier shape
+    {value, type, role_id} was rejected with HTTP 422
+    (`users.0.participable_id field is required`). This test pins the
+    correct shape so the bug can't sneak back.
     """
     http, _ = _http_mock(_mcp_text({"id": 1}))
     c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
     c.create(14, label="L", reviewer="agent:9", qa="agent:12")
-    parts = _captured_body(http)["params"]["arguments"]["participants"]
+    parts = _captured_body(http)["params"]["arguments"]["users"]
     assert len(parts) == 2
     for p in parts:
         # correct keys present
@@ -450,11 +455,27 @@ def test_create_participants_uses_participable_id_keys():
     assert by_role[6]["participable_type"] == "agent"
 
 
-def test_create_no_reviewer_no_qa_omits_participants():
+def test_create_uses_users_field_not_participants():
+    """Regression guard pinning the wire-key rename.
+
+    back/2542 renamed the role-attachment array on the wire from
+    `participants` to `users`. This test asserts the emitted payload
+    carries `users` and NOT `participants`, so we don't slip back.
+    """
+    http, _ = _http_mock(_mcp_text({"id": 1}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.create(14, label="L", reviewer="agent:9", qa="user:42")
+    args = _captured_body(http)["params"]["arguments"]
+    assert "users" in args
+    assert "participants" not in args
+
+
+def test_create_no_reviewer_no_qa_omits_users():
     http, _ = _http_mock(_mcp_text({"id": 1}))
     c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
     c.create(14, label="L", benefitable="agent:8")
     args = _captured_body(http)["params"]["arguments"]
+    assert "users" not in args
     assert "participants" not in args
     assert "reviewer" not in args
     assert "qa" not in args
@@ -468,9 +489,10 @@ def test_create_benefitable_and_billable_stay_top_level():
     args = _captured_body(http)["params"]["arguments"]
     # benefitable is a different parser — stays {type, value}.
     assert args["benefitable"] == {"type": "agent", "value": 8}
-    assert args["participants"] == [
+    assert args["users"] == [
         {"participable_id": 9, "participable_type": "agent", "role_id": 5}
     ]
+    assert "participants" not in args
 
 
 def test_parser_create_reviewer_and_qa():
@@ -685,7 +707,12 @@ def test_cli_dispatch_progress(monkeypatch, capsys):
 
 
 def test_create_reviewer_plus_participant_stacks():
-    """--reviewer agent:9 + --participant agent:5:reviewer → two role_id=5 entries."""
+    """--reviewer agent:9 + --participant agent:5:reviewer → two role_id=5 entries.
+
+    The `participants` kwarg is the stable Python API for callers
+    (CLI feeds it from --participant); on the wire both feed into
+    the `users` array (back/2542 rename).
+    """
     http, _ = _http_mock(_mcp_text({"id": 1}))
     c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
     c.create(
@@ -696,7 +723,8 @@ def test_create_reviewer_plus_participant_stacks():
         ],
     )
     args = _captured_body(http)["params"]["arguments"]
-    parts = args["participants"]
+    parts = args["users"]
+    assert "participants" not in args
     assert len(parts) == 2
     assert all(p["role_id"] == 5 for p in parts)
     values = sorted(p["participable_id"] for p in parts)

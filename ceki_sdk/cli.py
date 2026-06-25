@@ -424,7 +424,10 @@ def _parse_participant(spec: str) -> dict[str, Any]:
     """Parse 'agent:5:reviewer' / 'user:7:qa' / 'agent:5:role:42'.
 
     Returns {participable_id: int, participable_type: 'agent'|'user', role_id: int}
-    — the wire shape EventController participants[] validation expects.
+    — the element shape EventController users[] validation expects
+    (back/2542 renamed the array key from `participants` to `users`;
+    element shape unchanged). CLI flag `--participant` keeps its
+    human-facing name; only the wire key changed.
     """
     from .contract import ROLE_QA, ROLE_REVIEWER
 

@@ -11,7 +11,7 @@ import httpx
 
 from ._config import default_api_url
 
-# Contract role IDs (back/2485 participants[] payload).
+# Contract role IDs (back/2542 users[] payload — renamed from participants[]).
 ROLE_REVIEWER = 5
 ROLE_QA = 6
 
@@ -29,9 +29,11 @@ def _benefitable(value: str | None) -> dict[str, Any] | None:
 def _participant(value: str | None, role_id: int) -> dict[str, Any] | None:
     """Parse 'agent:8' / 'user:61' into {participable_id, participable_type, role_id}.
 
-    Wire shape required by EventController participants[] validation rules:
-    `participable_id` + `participable_type` + `role_id`. Anything else
-    (e.g. {value, type, role_id}) is rejected with HTTP 422.
+    Wire shape required by EventController users[] validation rules
+    (back/2542 renamed the array key from `participants` to `users`;
+    element shape unchanged): `participable_id` + `participable_type` +
+    `role_id`. Anything else (e.g. {value, type, role_id}) is rejected
+    with HTTP 422.
     """
     base = _benefitable(value)
     if base is None:
@@ -231,16 +233,19 @@ class ContractClient:
         qa: str | None = None,
         participants: list[dict[str, Any]] | None = None,
     ) -> Any:
-        # back/2485: reviewer/qa now live inside participants[].
-        all_participants: list[dict[str, Any]] = []
+        # back/2542: reviewer/qa now live inside users[] (renamed from
+        # participants[]). Element shape unchanged. The `participants`
+        # kwarg name is kept as a stable Python API for callers, but on
+        # the wire it is emitted under the `users` key.
+        users: list[dict[str, Any]] = []
         rev = _participant(reviewer, ROLE_REVIEWER)
         if rev is not None:
-            all_participants.append(rev)
+            users.append(rev)
         qa_p = _participant(qa, ROLE_QA)
         if qa_p is not None:
-            all_participants.append(qa_p)
+            users.append(qa_p)
         if participants:
-            all_participants.extend(participants)
+            users.extend(participants)
 
         args = _clean({
             "contract_id": int(contract_id),
@@ -258,7 +263,7 @@ class ContractClient:
             "description": description,
             "data": data,
             "benefitable": _benefitable(benefitable),
-            "participants": all_participants if all_participants else None,
+            "users": users if users else None,
         })
         return self.call(_TOOL_MAP["create"], args)
 
