@@ -315,6 +315,26 @@ class ContractClient:
         })
         return self.call(_TOOL_MAP["propose"], args)
 
+    def progress(
+        self,
+        event_id: int,
+        *,
+        status: int | None = None,
+        desc: str,
+    ) -> dict[str, Any]:
+        """Status correction (optional) + progress comment in one shot.
+
+        The event's own description is NOT touched. `--desc` becomes the
+        body of a child comment-event, not a label/description overwrite
+        on the parent event. Use this for Hand/QA/Reviewer progress
+        reports — `propose --desc` would clobber the parent spec.
+        """
+        status_result: Any = None
+        if status is not None:
+            status_result = self.propose(event_id, status_id=int(status))
+        comment_result = self.comment(event_id, description=desc)
+        return {"status_correction": status_result, "comment": comment_result}
+
     def vote(self, event_id: int, ids: list[int], vote: bool) -> Any:
         return self.call(_TOOL_MAP["vote"], {
             "event_id": int(event_id),

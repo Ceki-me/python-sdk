@@ -491,6 +491,139 @@ def test_parse_participant_bad_type_raises():
         _parse_participant("robot:5:reviewer")
 
 
+# ── progress (status correction + comment in one shot) ───────────
+
+
+def test_progress_calls_propose_then_comment(monkeypatch):
+    """progress(eid, status=222, desc='r') → propose(status_id=222) then comment(desc='r')."""
+    c = ContractClient(endpoint="http://x/mcp/agent", token="t")
+    calls: list[tuple[str, tuple, dict]] = []
+
+    def fake_propose(self, event_id, **kw):
+        calls.append(("propose", (event_id,), kw))
+        return {"applied": True, "id": 1}
+
+    def fake_comment(self, event_id, **kw):
+        calls.append(("comment", (event_id,), kw))
+        return {"id": 2}
+
+    monkeypatch.setattr(ContractClient, "propose", fake_propose)
+    monkeypatch.setattr(ContractClient, "comment", fake_comment)
+
+    result = c.progress(99, status=222, desc="r")
+
+    assert [name for name, _, _ in calls] == ["propose", "comment"]
+    assert calls[0][1] == (99,)
+    assert calls[0][2] == {"status_id": 222}
+    assert calls[1][1] == (99,)
+    assert calls[1][2] == {"description": "r"}
+    assert result == {
+        "status_correction": {"applied": True, "id": 1},
+        "comment": {"id": 2},
+    }
+
+
+def test_progress_without_status_only_comments(monkeypatch):
+    """progress(eid, desc=...) without status → ONLY comment, propose never called."""
+    c = ContractClient(endpoint="http://x/mcp/agent", token="t")
+    propose_calls: list = []
+    comment_calls: list = []
+
+    def fake_propose(self, event_id, **kw):
+        propose_calls.append((event_id, kw))
+        return {"applied": True}
+
+    def fake_comment(self, event_id, **kw):
+        comment_calls.append((event_id, kw))
+        return {"id": 7}
+
+    monkeypatch.setattr(ContractClient, "propose", fake_propose)
+    monkeypatch.setattr(ContractClient, "comment", fake_comment)
+
+    result = c.progress(99, desc="just an update")
+
+    assert propose_calls == []
+    assert comment_calls == [(99, {"description": "just an update"})]
+    assert result == {"status_correction": None, "comment": {"id": 7}}
+
+
+def test_progress_never_passes_desc_to_propose(monkeypatch):
+    """Regression guard: --desc must NEVER reach propose (would overwrite spec)."""
+    c = ContractClient(endpoint="http://x/mcp/agent", token="t")
+    propose_kwargs: dict = {}
+
+    def fake_propose(self, event_id, **kw):
+        propose_kwargs.update(kw)
+        return {"applied": True}
+
+    def fake_comment(self, event_id, **kw):
+        return {"id": 1}
+
+    monkeypatch.setattr(ContractClient, "propose", fake_propose)
+    monkeypatch.setattr(ContractClient, "comment", fake_comment)
+
+    c.progress(99, status=222, desc="this is a progress report, NOT a spec")
+
+    assert "status_id" in propose_kwargs
+    assert "desc" not in propose_kwargs
+    assert "description" not in propose_kwargs
+    assert "label" not in propose_kwargs
+
+
+def test_parser_progress_full():
+    a = build_parser().parse_args([
+        "contract", "progress", "99", "--status", "222", "--desc", "did stuff",
+    ])
+    assert a.contract_action == "progress"
+    assert a.eid == 99
+    assert a.status == 222
+    assert a.desc == "did stuff"
+
+
+def test_parser_progress_no_status():
+    a = build_parser().parse_args([
+        "contract", "progress", "99", "--desc", "just a note",
+    ])
+    assert a.contract_action == "progress"
+    assert a.eid == 99
+    assert a.status is None
+    assert a.desc == "just a note"
+
+
+def test_parser_progress_missing_desc_fails():
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["contract", "progress", "99"])
+
+
+def test_cli_dispatch_progress(monkeypatch, capsys):
+    """End-to-end: `ceki contract progress 99 --status 222 --desc x` calls client.progress."""
+    from ceki_sdk import cli as cli_module
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def progress(self, eid, *, status, desc):
+            captured["eid"] = eid
+            captured["status"] = status
+            captured["desc"] = desc
+            return {"status_correction": {"ok": 1}, "comment": {"ok": 2}}
+
+    monkeypatch.setattr(cli_module, "_contract_client", lambda: FakeClient())
+
+    parser = cli_module.build_parser()
+    args = parser.parse_args(["contract", "progress", "99", "--status", "222", "--desc", "x"])
+    rc = cli_module._cmd_contract(args)
+
+    assert rc == 0
+    assert captured == {"eid": 99, "status": 222, "desc": "x"}
+
+
 def test_create_reviewer_plus_participant_stacks():
     """--reviewer agent:9 + --participant agent:5:reviewer → two role_id=5 entries."""
     http, _ = _http_mock(_mcp_text({"id": 1}))

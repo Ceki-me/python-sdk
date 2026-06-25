@@ -565,6 +565,12 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     currency=args.currency,
                     benefitable=args.benefitable,
                 ))
+            elif action == "progress":
+                _contract_dump(cli.progress(
+                    args.eid,
+                    status=args.status,
+                    desc=args.desc,
+                ))
             elif action == "vote":
                 ids = [int(s) for s in str(args.ids).split(",") if s.strip()]
                 vote = str(args.vote).lower() in ("true", "1", "yes")
@@ -875,6 +881,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_cp.add_argument("--amount", type=int)
     p_cp.add_argument("--currency")
     p_cp.add_argument("--benefitable")
+
+    p_cpr = csub.add_parser(
+        "progress",
+        help="Status correction + progress comment (description is not touched)",
+    )
+    p_cpr.add_argument("eid", type=int)
+    p_cpr.add_argument("--status", type=int)
+    p_cpr.add_argument("--desc", required=True)
 
     p_cv = csub.add_parser("vote", help="Vote on correction(s)")
     p_cv.add_argument("eid", type=int)
