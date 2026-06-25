@@ -27,11 +27,20 @@ def _benefitable(value: str | None) -> dict[str, Any] | None:
 
 
 def _participant(value: str | None, role_id: int) -> dict[str, Any] | None:
-    """Parse 'agent:8' / 'user:61' into {value, type, role_id}."""
+    """Parse 'agent:8' / 'user:61' into {participable_id, participable_type, role_id}.
+
+    Wire shape required by EventController participants[] validation rules:
+    `participable_id` + `participable_type` + `role_id`. Anything else
+    (e.g. {value, type, role_id}) is rejected with HTTP 422.
+    """
     base = _benefitable(value)
     if base is None:
         return None
-    return {"value": base["value"], "type": base["type"], "role_id": role_id}
+    return {
+        "participable_id": base["value"],
+        "participable_type": base["type"],
+        "role_id": role_id,
+    }
 
 
 def _clean(args: dict[str, Any]) -> dict[str, Any]:

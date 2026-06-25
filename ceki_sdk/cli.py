@@ -423,7 +423,8 @@ def _contract_client():
 def _parse_participant(spec: str) -> dict[str, Any]:
     """Parse 'agent:5:reviewer' / 'user:7:qa' / 'agent:5:role:42'.
 
-    Returns {value: int, type: 'agent'|'user', role_id: int}.
+    Returns {participable_id: int, participable_type: 'agent'|'user', role_id: int}
+    — the wire shape EventController participants[] validation expects.
     """
     from .contract import ROLE_QA, ROLE_REVIEWER
 
@@ -461,7 +462,11 @@ def _parse_participant(spec: str) -> dict[str, Any]:
             f"--participant unknown role {role!r}; expected 'reviewer', 'qa', "
             f"or 'role:NUMBER'"
         )
-    return {"value": value, "type": ptype, "role_id": role_id}
+    return {
+        "participable_id": value,
+        "participable_type": ptype,
+        "role_id": role_id,
+    }
 
 
 def _contract_dump(value: Any) -> None:
