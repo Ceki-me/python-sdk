@@ -21,7 +21,7 @@ from ._models import BrowserOption, ChatMessage, Match, ReadReceipt, SessionInfo
 from ._profile import BrowserProfile
 from .humanize import HumanProfile
 
-__version__ = "2.29.2"
+__version__ = "2.30.0"
 __all__ = [
     "connect",
     "ConnectOptions",

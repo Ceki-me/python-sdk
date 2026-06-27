@@ -188,6 +188,44 @@ def test_comment_strips_undefined():
     assert "amount" not in args
     assert "currency" not in args
     assert "benefitable" not in args
+    # task 2936 — `description` must never appear on a comment payload.
+    assert "description" not in args
+
+
+def test_comment_long_multiline_body_in_label_no_description():
+    """Regression guard for task 2936 (duplicate-comment bug).
+
+    A comment's body lives ENTIRELY in `label` (events.label is
+    unbounded TEXT). `description` is not part of the comment() API and
+    must never end up on the wire — the web renderer would show both
+    `label` and `description`, duplicating the body.
+    """
+    http, _ = _http_mock(_mcp_text({"id": 99}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    body = (
+        "long body across\nmultiple lines exceeding 60 characters in "
+        "total length here for sure"
+    )
+    c.comment(99, label=body)
+    args = _captured_body(http)["params"]["arguments"]
+    # Full body, untruncated, multi-line preserved.
+    assert args["label"] == body
+    assert len(body) > 60  # sanity — the body really is over 60 chars
+    # No description key at all on the wire.
+    assert "description" not in args
+
+
+def test_comment_no_description_kwarg():
+    """The comment() public API must not accept `description=`.
+
+    Dropping this kwarg is the API-level breaking change for 2.30.0:
+    a comment's body lives in `label`. Anyone still passing
+    `description=` gets a TypeError at call time, which is the loud
+    failure we want.
+    """
+    c = ContractClient(endpoint="http://x/mcp/agent", token="t")
+    with pytest.raises(TypeError):
+        c.comment(99, label="x", description="y")  # type: ignore[call-arg]
 
 
 def test_propose_maps_tool():
@@ -557,7 +595,12 @@ def test_parse_participant_bad_type_raises():
 
 
 def test_progress_calls_propose_then_comment(monkeypatch):
-    """progress(eid, status=222, desc='r') → propose(status_id=222) then comment(desc='r')."""
+    """progress(eid, status=222, desc='r') → propose(status_id=222) then comment(label='r').
+
+    The full body goes into `label`. `description` is never set on a
+    comment — the UI renders `label` AND `description`, so doing both
+    would visibly duplicate the body.
+    """
     c = ContractClient(endpoint="http://x/mcp/agent", token="t")
     calls: list[tuple[str, tuple, dict]] = []
 
@@ -578,7 +621,8 @@ def test_progress_calls_propose_then_comment(monkeypatch):
     assert calls[0][1] == (99,)
     assert calls[0][2] == {"status_id": 222}
     assert calls[1][1] == (99,)
-    assert calls[1][2] == {"label": "r", "description": "r"}
+    assert calls[1][2] == {"label": "r"}
+    assert "description" not in calls[1][2]
     assert result == {
         "status_correction": {"applied": True, "id": 1},
         "comment": {"id": 2},
@@ -605,7 +649,8 @@ def test_progress_without_status_only_comments(monkeypatch):
     result = c.progress(99, desc="just an update")
 
     assert propose_calls == []
-    assert comment_calls == [(99, {"label": "just an update", "description": "just an update"})]
+    assert comment_calls == [(99, {"label": "just an update"})]
+    assert "description" not in comment_calls[0][1]
     assert result == {"status_correction": None, "comment": {"id": 7}}
 
 
@@ -632,8 +677,17 @@ def test_progress_never_passes_desc_to_propose(monkeypatch):
     assert "label" not in propose_kwargs
 
 
-def test_progress_label_derived_from_desc(monkeypatch):
-    """Backend requires label on comments — progress should derive one from desc."""
+def test_progress_puts_full_desc_in_label_no_description(monkeypatch):
+    """Regression guard for the duplicate-comment bug (task 2936).
+
+    progress() used to send `label = desc.splitlines()[0][:60]` AND the
+    full text as `description`. The UI renders both fields, so the
+    truncated prefix appeared on top of the full body — visible
+    duplication.
+
+    The fix: full body goes into `label` (events.label is unbounded
+    TEXT), and `description` is never set on a comment.
+    """
     c = ContractClient(endpoint="http://x/mcp/agent", token="t")
     comment_kwargs: dict = {}
 
@@ -647,13 +701,29 @@ def test_progress_label_derived_from_desc(monkeypatch):
     monkeypatch.setattr(ContractClient, "propose", fake_propose)
     monkeypatch.setattr(ContractClient, "comment", fake_comment)
 
-    long_desc = "x" * 200 + "\nsecond line"
+    long_desc = "Long report\nwith multiple\nlines that go well past sixty characters total"
     c.progress(99, desc=long_desc)
 
-    assert "label" in comment_kwargs
-    assert len(comment_kwargs["label"]) <= 60
-    assert comment_kwargs["label"] == "x" * 60
-    assert comment_kwargs["description"] == long_desc
+    # Full body in label, untruncated, multi-line preserved.
+    assert comment_kwargs["label"] == long_desc
+    # `description` MUST NOT be passed — UI duplication guard.
+    assert "description" not in comment_kwargs
+
+
+def test_progress_wire_payload_label_only(monkeypatch):
+    """End-to-end wire shape: progress() comment arguments contain
+    `label` with the full body and NO `description` key.
+    """
+    http, _ = _http_mock(_mcp_text({"id": 5}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.progress(99, status=222, desc="Long report\nwith multiple\nlines")
+
+    # Two POSTs: propose, then comment. Comment is the last one.
+    last_body = http.post.call_args.kwargs["json"]
+    assert last_body["params"]["name"] == "comment"
+    args = last_body["params"]["arguments"]
+    assert args["label"] == "Long report\nwith multiple\nlines"
+    assert "description" not in args
 
 
 def test_parser_progress_full():

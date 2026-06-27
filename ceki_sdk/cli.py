@@ -545,9 +545,15 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     participants=extra_parts or None,
                 ))
             elif action == "comment":
+                # A comment's body lives in `label` (events.label is
+                # unbounded TEXT). `--label` wins when both are given;
+                # otherwise `--desc` is the body. `description` is never
+                # sent on a comment — the UI would render it on top of
+                # `label` and duplicate the body.
+                body = args.label if args.label is not None else args.desc
                 _contract_dump(cli.comment(
                     args.eid,
-                    label=args.label,
+                    label=body,
                     type_id=args.type,
                     status_id=args.status,
                     start=args.start,
@@ -556,7 +562,6 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     duration=args.duration,
                     amount=args.amount,
                     currency=args.currency,
-                    description=args.desc,
                     benefitable=args.benefitable,
                 ))
             elif action == "propose":

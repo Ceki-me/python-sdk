@@ -281,9 +281,16 @@ class ContractClient:
         duration: int | None = None,
         amount: int | None = None,
         currency: str | None = None,
-        description: str | None = None,
         benefitable: str | None = None,
     ) -> Any:
+        """Post a comment event.
+
+        The comment body lives entirely in `label` (events.label is
+        unbounded TEXT). `description` is deliberately NOT exposed: the
+        web UI renders both `label` and `description` on a comment, and
+        the human-typed path only writes to `label`. Passing both would
+        produce a visible duplicate in the renderer.
+        """
         args = _clean({
             "event_id": int(event_id),
             "label": label,
@@ -295,7 +302,6 @@ class ContractClient:
             "duration": duration,
             "amount": amount,
             "currency": currency,
-            "description": description,
             "benefitable": _benefitable(benefitable),
         })
         return self.call(_TOOL_MAP["comment"], args)
@@ -347,10 +353,11 @@ class ContractClient:
         status_result: Any = None
         if status is not None:
             status_result = self.propose(event_id, status_id=int(status))
-        # Backend requires `label` on comment events — derive a short one
-        # from the desc (server-side validation rejects label-less comments).
-        label = (desc or "").strip().splitlines()[0][:60] or "progress"
-        comment_result = self.comment(event_id, label=label, description=desc)
+        # events.label is unbounded TEXT — the full body lives there, and
+        # `description` is never set on a comment (the UI renders both,
+        # which would duplicate the body for SDK-posted comments).
+        label = desc if (desc or "").strip() else "progress"
+        comment_result = self.comment(event_id, label=label)
         return {"status_correction": status_result, "comment": comment_result}
 
     def vote(self, event_id: int, ids: list[int], vote: bool) -> Any:
