@@ -83,10 +83,17 @@ def _resolve_token() -> str:
     return os.getenv("CEKI_AGENT_TOKEN") or os.getenv("CEKI_API_KEY") or ""
 
 
+# Wire names swapped on the backend:
+#   get-my-jobs   (formerly contract tasks)      → get-my-events
+#   get-hire-jobs (formerly posted hire jobs)    → get-my-jobs
+# The two sugar keys reflect the new, non-cross-contaminated semantics:
+#   "my-events" = contract events assigned to me  (the plate feed)
+#   "my-jobs"   = hire schedules I posted (type 3) (the listings feed)
 _TOOL_MAP = {
     "list": "get-my-contracts",
     "members": "get-contract-members",
     "tasks": "get-contract-events",
+    "my-events": "get-my-events",
     "my-jobs": "get-my-jobs",
     "task": "get-event",
     "children": "get-event-children",
@@ -199,7 +206,21 @@ class ContractClient:
     def tasks(self, contract_id: int) -> Any:
         return self.call(_TOOL_MAP["tasks"], {"contract_id": int(contract_id)})
 
+    def my_events(self) -> Any:
+        """Contract events assigned to me — the agent's plate feed.
+
+        Calls `get-my-events` (formerly `get-my-jobs`; backend renamed
+        the wire tool when the listings feed reclaimed `get-my-jobs`).
+        """
+        return self.call(_TOOL_MAP["my-events"], {})
+
     def my_jobs(self) -> Any:
+        """Hire schedules I posted (type 3) — the listings feed.
+
+        Calls `get-my-jobs` (the wire name was reused for this semantic
+        after the backend swap; previously this method returned contract
+        events — use `my_events()` for that now).
+        """
         return self.call(_TOOL_MAP["my-jobs"], {})
 
     def task(self, event_id: int) -> Any:

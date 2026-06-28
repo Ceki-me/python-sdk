@@ -255,6 +255,57 @@ def test_history_tool_name():
     assert body["params"]["arguments"] == {"event_id": 42}
 
 
+def test_my_events_uses_get_my_events_tool():
+    """Pin the new wire name for the contract-task plate feed.
+
+    Backend swapped: the wire tool that returns contract events
+    assigned to me is now `get-my-events` (formerly `get-my-jobs`).
+    The Python method is `ContractClient.my_events()`.
+    """
+    http, _ = _http_mock(_mcp_text([]))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.my_events()
+    body = _captured_body(http)
+    assert body["params"]["name"] == "get-my-events"
+    assert body["params"]["arguments"] == {}
+
+
+def test_my_jobs_uses_get_my_jobs_tool_for_hire_schedules():
+    """Pin the reused wire name for the hire-schedules listings feed.
+
+    Backend swapped: `get-my-jobs` (the wire tool) now returns the
+    hire schedules I posted (type 3) — what was previously served by
+    `get-hire-jobs`. The Python method `ContractClient.my_jobs()`
+    targets this new semantic; for contract events use `my_events()`.
+    """
+    http, _ = _http_mock(_mcp_text([]))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.my_jobs()
+    body = _captured_body(http)
+    assert body["params"]["name"] == "get-my-jobs"
+    assert body["params"]["arguments"] == {}
+
+
+def test_no_hire_jobs_wire_name_anywhere():
+    """The old `get-hire-jobs` wire name must be gone from the SDK map."""
+    from ceki_sdk.contract import _TOOL_MAP
+    assert "get-hire-jobs" not in _TOOL_MAP.values()
+    # And the new entries are present under the right sugar keys.
+    assert _TOOL_MAP["my-events"] == "get-my-events"
+    assert _TOOL_MAP["my-jobs"] == "get-my-jobs"
+
+
+def test_parser_contract_my_events():
+    a = build_parser().parse_args(["contract", "my-events"])
+    assert a.command == "contract" and a.contract_action == "my-events"
+
+
+def test_parser_contract_my_jobs_still_present():
+    """`contract my-jobs` is still a valid CLI action (now hire schedules)."""
+    a = build_parser().parse_args(["contract", "my-jobs"])
+    assert a.command == "contract" and a.contract_action == "my-jobs"
+
+
 # ── polling ───────────────────────────────────────────────────────
 
 

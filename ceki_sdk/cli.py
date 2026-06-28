@@ -500,6 +500,8 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                 for cid in ids:
                     print(f"--- contract {cid} ---")
                     _contract_dump(cli.tasks(int(cid)))
+            elif action == "my-events":
+                _contract_dump(cli.my_events())
             elif action == "my-jobs":
                 _contract_dump(cli.my_jobs())
             elif action == "task":
@@ -822,7 +824,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_ct = csub.add_parser("tasks", help="List contract events (default: CEKI_CONTRACT_IDS)")
     p_ct.add_argument("cid", type=int, nargs="?", help="Contract ID")
 
-    csub.add_parser("my-jobs", help="List events assigned to me")
+    csub.add_parser(
+        "my-events",
+        help=(
+            "List contract events assigned to me (get-my-events). "
+            "The 'plate' feed. Wire tool renamed from get-my-jobs."
+        ),
+    )
+    csub.add_parser(
+        "my-jobs",
+        help=(
+            "List hire schedules I posted, type 3 (get-my-jobs). "
+            "The listings feed. Wire tool reused after the backend swap "
+            "(formerly get-hire-jobs); for contract events use 'my-events'."
+        ),
+    )
 
     p_ctask = csub.add_parser("task", help="Get event")
     p_ctask.add_argument("eid", type=int, help="Event ID")
