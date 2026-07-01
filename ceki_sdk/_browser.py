@@ -486,6 +486,52 @@ class Browser:
 
         return parsed
 
+    async def copy(self) -> str:
+        """Return the text of the current window selection.
+
+        Uses ``Runtime.evaluate`` with ``window.getSelection().toString()``.
+        Does NOT touch the OS clipboard (no ``navigator.clipboard`` — not in the
+        main-mode CDP allowlist). Returns ``""`` when nothing is selected.
+        """
+        result = await self.send({
+            "method": "Runtime.evaluate",
+            "params": {
+                "expression": "window.getSelection().toString()",
+                "returnByValue": True,
+            },
+        })
+        return (result.get("result") or {}).get("value") or ""
+
+    async def paste(self, selector: str, text: str) -> None:
+        """Focus the element matching ``selector`` and insert ``text`` via CDP.
+
+        Runs ``document.querySelector(<selector>).focus()`` through
+        ``Runtime.evaluate``, then dispatches ``Input.insertText``. The insertText
+        path fires real ``input`` / ``beforeinput`` events, so controlled
+        React/Vue inputs pick up the update (unlike a raw ``value =`` assignment).
+
+        ``selector`` is JSON-escaped, so quotes / backticks / newlines / unicode
+        in the selector are safe. ``text`` goes to the CDP param verbatim.
+
+        Args:
+            selector: CSS selector for the target input / textarea / contentEditable.
+            text: The text to insert at the current caret position.
+
+        Raises:
+            The underlying ``Runtime.evaluate`` will surface a JS TypeError if
+            ``querySelector`` returns ``null`` — the send() call will reject with
+            a CDP error rather than silently swallowing it.
+        """
+        focus_expr = f"document.querySelector({json.dumps(selector)}).focus()"
+        await self.send({
+            "method": "Runtime.evaluate",
+            "params": {"expression": focus_expr},
+        })
+        await self.send({
+            "method": "Input.insertText",
+            "params": {"text": text},
+        })
+
     def set_human(self, profile) -> "HumanProfile | None":
         prev = self._humanizer.profile if self._humanizer else None
         self._humanizer = _resolve_human(profile)
