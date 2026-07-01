@@ -831,6 +831,110 @@ def test_cli_dispatch_progress(monkeypatch, capsys):
     assert captured == {"eid": 99, "status": 222, "desc": "x"}
 
 
+# ── call-human (task 4019) ────────────────────────────────────────
+
+
+def test_call_human_calls_correct_tool():
+    """`client.call_human(99, 'stuck', 'body')` → tool name 'call-human'
+    on the wire, with `{event_id, kind, desc}` arguments.
+    """
+    http, _ = _http_mock(_mcp_text({
+        "recipients": [], "dispatched": 0, "deep_link": "u", "kind": "stuck",
+    }))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.call_human(99, "stuck", "body")
+    body = _captured_body(http)
+    assert body["params"]["name"] == "call-human"
+    assert body["params"]["arguments"] == {
+        "event_id": 99, "kind": "stuck", "desc": "body",
+    }
+
+
+def test_call_human_rejects_bad_kind():
+    """Any kind outside {'input','review','stuck'} → ValueError."""
+    c = ContractClient(endpoint="http://x/mcp/agent", token="t")
+    with pytest.raises(ValueError, match="kind must be"):
+        c.call_human(99, "urgent", "body")
+    with pytest.raises(ValueError, match="kind must be"):
+        c.call_human(99, "", "body")
+
+
+def test_parser_contract_call_human_ok():
+    a = build_parser().parse_args([
+        "contract", "call-human", "42", "--kind", "review", "--desc", "why",
+    ])
+    assert a.contract_action == "call-human"
+    assert a.event_id == 42
+    assert a.kind == "review"
+    assert a.desc == "why"
+
+
+def test_parser_contract_call_human_missing_kind_fails():
+    with pytest.raises(SystemExit):
+        build_parser().parse_args([
+            "contract", "call-human", "42", "--desc", "why",
+        ])
+
+
+def test_parser_contract_call_human_missing_desc_fails():
+    with pytest.raises(SystemExit):
+        build_parser().parse_args([
+            "contract", "call-human", "42", "--kind", "review",
+        ])
+
+
+def test_parser_contract_call_human_missing_event_id_fails():
+    with pytest.raises(SystemExit):
+        build_parser().parse_args([
+            "contract", "call-human", "--kind", "review", "--desc", "why",
+        ])
+
+
+def test_parser_contract_call_human_bad_kind_rejected():
+    with pytest.raises(SystemExit):
+        build_parser().parse_args([
+            "contract", "call-human", "42", "--kind", "urgent", "--desc", "why",
+        ])
+
+
+def test_cli_dispatch_call_human(monkeypatch, capsys):
+    """End-to-end: CLI `contract call-human 42 --kind review --desc why`
+    hits `client.call_human(42, 'review', 'why')` exactly.
+    """
+    from ceki_sdk import cli as cli_module
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def call_human(self, event_id, kind, desc):
+            captured["event_id"] = event_id
+            captured["kind"] = kind
+            captured["desc"] = desc
+            return {
+                "recipients": [{"user_id": 1, "label": "L", "reason": "R"}],
+                "dispatched": 1,
+                "deep_link": "https://ex/e/42",
+                "kind": "review",
+            }
+
+    monkeypatch.setattr(cli_module, "_contract_client", lambda: FakeClient())
+
+    parser = cli_module.build_parser()
+    args = parser.parse_args([
+        "contract", "call-human", "42", "--kind", "review", "--desc", "why",
+    ])
+    rc = cli_module._cmd_contract(args)
+
+    assert rc == 0
+    assert captured == {"event_id": 42, "kind": "review", "desc": "why"}
+
+
 def test_create_reviewer_plus_participant_stacks():
     """--reviewer agent:9 + --participant agent:5:reviewer → two role_id=5 entries.
 

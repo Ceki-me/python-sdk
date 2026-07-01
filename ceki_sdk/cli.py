@@ -504,6 +504,8 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                 _contract_dump(cli.my_events())
             elif action == "my-jobs":
                 _contract_dump(cli.my_jobs())
+            elif action == "call-human":
+                _contract_dump(cli.call_human(args.event_id, args.kind, args.desc))
             elif action == "task":
                 _contract_dump(cli.task(args.eid))
             elif action == "children":
@@ -928,6 +930,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_cw = csub.add_parser("watch", help="Continuous polling")
     p_cw.add_argument("interval", type=int, nargs="?", default=8, help="Seconds, min 6")
+
+    p_ch = csub.add_parser(
+        "call-human",
+        help="Escalate to a human on an event (input/review/stuck).",
+    )
+    p_ch.add_argument("event_id", type=int)
+    p_ch.add_argument(
+        "--kind",
+        choices=["input", "review", "stuck"],
+        required=True,
+        help="Type of escalation: input | review | stuck.",
+    )
+    p_ch.add_argument(
+        "--desc",
+        required=True,
+        help="Specific question / decision / what was tried.",
+    )
 
     csub.add_parser("tools", help="List available MCP tools")
 

@@ -214,6 +214,28 @@ class ContractClient:
         """
         return self.call(_TOOL_MAP["my-events"], {})
 
+    def call_human(self, event_id: int, kind: str, desc: str) -> Any:
+        """Escalate to a human up the event→parent→contract→schedule chain.
+
+        Args:
+            event_id: id of the event to escalate on (must exist).
+            kind: 'input' | 'review' | 'stuck'.
+            desc: what specifically the caller is stuck on.
+
+        Returns a dict shaped
+        ``{"recipients":[{"user_id","label","reason"},...], "dispatched":<int>,
+        "deep_link":"<url>", "kind":"<kind>"}``.
+        """
+        if kind not in ("input", "review", "stuck"):
+            raise ValueError(
+                f"kind must be 'input' | 'review' | 'stuck', got {kind!r}"
+            )
+        return self.call("call-human", {
+            "event_id": int(event_id),
+            "kind": kind,
+            "desc": desc,
+        })
+
     def my_jobs(self) -> Any:
         """Hire schedules I posted (type 3) — the listings feed.
 
