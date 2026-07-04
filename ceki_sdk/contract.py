@@ -276,6 +276,7 @@ class ContractClient:
         reviewer: str | None = None,
         qa: str | None = None,
         participants: list[dict[str, Any]] | None = None,
+        tags: list[dict[str, Any]] | None = None,
     ) -> Any:
         # back/2542: reviewer/qa now live inside users[] (renamed from
         # participants[]). Element shape unchanged. The `participants`
@@ -308,6 +309,10 @@ class ContractClient:
             "data": data,
             "benefitable": _benefitable(benefitable),
             "users": users if users else None,
+            # back/3165: project tags live in events.settings.tags[]. `tags`
+            # is CLI/SDK sugar — a bare list of {key,label?,color?} dicts —
+            # emitted on the wire under the `settings` blob the backend expects.
+            "settings": {"tags": tags} if tags else None,
         })
         return self.call(_TOOL_MAP["create"], args)
 

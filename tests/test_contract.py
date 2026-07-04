@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from ceki_sdk.cli import build_parser
+from ceki_sdk.cli import _parse_tags, build_parser
 from ceki_sdk.contract import (
     ContractClient,
     ContractError,
@@ -958,3 +958,70 @@ def test_create_reviewer_plus_participant_stacks():
     assert all(p["role_id"] == 5 for p in parts)
     values = sorted(p["participable_id"] for p in parts)
     assert values == [5, 9]
+
+
+# ── tags sugar → settings.tags[] (create only) ────────────────────
+
+
+def test_create_tags_emit_under_settings():
+    http, _ = _http_mock(_mcp_text({"id": 1}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.create(14, label="L", tags=[
+        {"key": "backend", "label": "Backend", "color": "#ff0000"},
+        {"key": "urgent"},
+    ])
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["settings"] == {"tags": [
+        {"key": "backend", "label": "Backend", "color": "#ff0000"},
+        {"key": "urgent"},
+    ]}
+
+
+def test_create_without_tags_omits_settings():
+    http, _ = _http_mock(_mcp_text({"id": 1}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.create(14, label="L")
+    args = _captured_body(http)["params"]["arguments"]
+    assert "settings" not in args
+
+
+def test_parse_tags_bare_keys():
+    assert _parse_tags("backend,urgent") == [
+        {"key": "backend"}, {"key": "urgent"}
+    ]
+
+
+def test_parse_tags_key_label_color():
+    assert _parse_tags("backend:Backend:#ff0000") == [
+        {"key": "backend", "label": "Backend", "color": "#ff0000"}
+    ]
+
+
+def test_parse_tags_empty_label_skipped():
+    assert _parse_tags("docs::#0af") == [
+        {"key": "docs", "color": "#0af"}
+    ]
+
+
+def test_parse_tags_trims_and_ignores_blanks():
+    assert _parse_tags(" backend , , qa ") == [
+        {"key": "backend"}, {"key": "qa"}
+    ]
+
+
+def test_parse_tags_missing_key_raises():
+    with pytest.raises(ValueError):
+        _parse_tags(":nope")
+
+
+def test_parse_tags_all_blank_raises():
+    with pytest.raises(ValueError):
+        _parse_tags(" , , ")
+
+
+def test_parser_create_tags_flag():
+    a = build_parser().parse_args([
+        "contract", "create", "14", "--label", "X",
+        "--tags", "backend:Backend:#ff0000,urgent",
+    ])
+    assert a.tags == "backend:Backend:#ff0000,urgent"

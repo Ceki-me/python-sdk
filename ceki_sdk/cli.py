@@ -472,6 +472,41 @@ def _parse_participant(spec: str) -> dict[str, Any]:
     }
 
 
+def _parse_tags(spec: str) -> list[dict[str, Any]]:
+    """Parse the `--tags` sugar into settings.tags[] elements.
+
+    Comma-separated list; each item is `key[:label[:color]]`:
+      backend,urgent            -> [{key:backend}, {key:urgent}]
+      backend:Backend:#ff0000   -> [{key:backend, label:Backend, color:#ff0000}]
+      docs::#0af                -> [{key:docs, color:#0af}]   (empty label skipped)
+
+    Returns the {key, label?, color?} dicts the create-contract-event tool
+    persists under events.settings.tags[].
+    """
+    tags: list[dict[str, Any]] = []
+    for raw in spec.split(","):
+        item = raw.strip()
+        if not item:
+            continue
+        key, _, tail = item.partition(":")
+        key = key.strip()
+        if not key:
+            raise ValueError(f"--tags item needs a key, got: {raw!r}")
+        tag: dict[str, Any] = {"key": key}
+        if tail:
+            label, _, color = tail.partition(":")
+            label = label.strip()
+            color = color.strip()
+            if label:
+                tag["label"] = label
+            if color:
+                tag["color"] = color
+        tags.append(tag)
+    if not tags:
+        raise ValueError(f"--tags produced no tags from: {spec!r}")
+    return tags
+
+
 def _contract_dump(value: Any) -> None:
     if isinstance(value, str):
         sys.stdout.write(value)
@@ -525,6 +560,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                         _parse_participant(spec)
                         for spec in (getattr(args, "participant", None) or [])
                     ]
+                    tags = _parse_tags(args.tags) if getattr(args, "tags", None) else None
                 except ValueError as e:
                     _err(str(e), "args")
                     return 1
@@ -547,6 +583,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     reviewer=args.reviewer,
                     qa=args.qa,
                     participants=extra_parts or None,
+                    tags=tags,
                 ))
             elif action == "comment":
                 # A comment's body lives in `label` (events.label is
@@ -885,6 +922,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_cc.add_argument("--desc")
     p_cc.add_argument("--data", help="Extra JSON object passed through as `data`")
+    p_cc.add_argument(
+        "--tags",
+        help=(
+            "Project tags (sugar for settings.tags[]). Comma-separated, each "
+            "item key[:label[:color]]. E.g. 'backend,urgent' or "
+            "'backend:Backend:#ff0000'."
+        ),
+    )
 
     p_cco = csub.add_parser("comment", help="Post comment on event")
     p_cco.add_argument("eid", type=int)
