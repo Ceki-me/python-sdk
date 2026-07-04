@@ -425,6 +425,61 @@ def test_propose_passes_start_end_date():
     assert args["start"] == "s" and args["end"] == "e" and args["date"] == "2026-06-18"
 
 
+def test_propose_forwards_settings_tags_verbatim():
+    """back/2796 / 2825: propose() forwards settings (tags, reply_to,
+    blocked_by, do_after) verbatim onto the propose-correction wire."""
+    http, _ = _http_mock(_mcp_text({}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.propose(
+        7,
+        status_id=222,
+        settings={
+            "tags": [
+                {"key": "backend"},
+                {"key": "ui", "label": "UI"},
+                {"key": "bug", "label": "Bug", "color": "red"},
+            ],
+            "reply_to": 42,
+            "blocked_by": [9, 10],
+            "do_after": "2026-07-04T00:00:00Z",
+        },
+    )
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["settings"] == {
+        "tags": [
+            {"key": "backend"},
+            {"key": "ui", "label": "UI"},
+            {"key": "bug", "label": "Bug", "color": "red"},
+        ],
+        "reply_to": 42,
+        "blocked_by": [9, 10],
+        "do_after": "2026-07-04T00:00:00Z",
+    }
+
+
+def test_propose_omits_settings_when_not_supplied():
+    http, _ = _http_mock(_mcp_text({}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.propose(7, status_id=222)
+    args = _captured_body(http)["params"]["arguments"]
+    assert "settings" not in args
+
+
+def test_parser_propose_tagsSugar_to_settings():
+    """`ceki contract propose <eid> --tags backend,ui:UI` parses into
+    settings.tags[] on the wire via the CLI dispatch."""
+    http, _ = _http_mock(_mcp_text({}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    # Simulate the CLI dispatch path: parse the sugar, build settings, call.
+    tags = _parse_tags("backend,ui:UI")
+    c.propose(7, status_id=222, settings={"tags": tags})
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["settings"]["tags"] == [
+        {"key": "backend"},
+        {"key": "ui", "label": "UI"},
+    ]
+
+
 def test_history_passes_limit():
     http, _ = _http_mock(_mcp_text([]))
     c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")

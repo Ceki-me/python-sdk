@@ -368,6 +368,7 @@ class ContractClient:
         amount: int | None = None,
         currency: str | None = None,
         benefitable: str | None = None,
+        settings: dict[str, Any] | None = None,
     ) -> Any:
         args = _clean({
             "event_id": int(event_id),
@@ -381,6 +382,10 @@ class ContractClient:
             "amount": amount,
             "currency": currency,
             "benefitable": _benefitable(benefitable),
+            # back/2796: ProposeCorrectionTool persists settings (tags,
+            # reply_to, blocked_by, do_after) onto the event. Forwarded
+            # verbatim — only attached when the caller supplies it.
+            "settings": settings,
         })
         return self.call(_TOOL_MAP["propose"], args)
 

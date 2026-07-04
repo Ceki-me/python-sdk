@@ -606,6 +606,10 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     benefitable=args.benefitable,
                 ))
             elif action == "propose":
+                tags = _parse_tags(args.tags) if getattr(args, "tags", None) else None
+                settings: dict[str, Any] | None = (
+                    {"tags": tags} if tags else None
+                )
                 _contract_dump(cli.propose(
                     args.eid,
                     status_id=args.status,
@@ -618,6 +622,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     amount=args.amount,
                     currency=args.currency,
                     benefitable=args.benefitable,
+                    settings=settings,
                 ))
             elif action == "progress":
                 _contract_dump(cli.progress(
@@ -957,6 +962,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_cp.add_argument("--amount", type=int)
     p_cp.add_argument("--currency")
     p_cp.add_argument("--benefitable")
+    p_cp.add_argument(
+        "--tags",
+        help=(
+            "Project tags (sugar for settings.tags[]). Comma-separated, each "
+            "item key[:label[:color]]. E.g. 'backend,urgent' or "
+            "'backend:Backend:#ff0000'. back/2796 persists onto the event."
+        ),
+    )
 
     p_cpr = csub.add_parser(
         "progress",
