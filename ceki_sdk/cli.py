@@ -420,6 +420,93 @@ def _contract_client():
     return ContractClient()
 
 
+def _parse_participant(spec: str) -> dict[str, Any]:
+    """Parse 'agent:5:reviewer' / 'user:7:qa' / 'agent:5:role:42'.
+
+    Returns {participable_id: int, participable_type: 'agent'|'user', role_id: int}
+    — the element shape EventController users[] validation expects
+    (back/2542 renamed the array key from `participants` to `users`;
+    element shape unchanged). CLI flag `--participant` keeps its
+    human-facing name; only the wire key changed.
+    """
+    from .contract import ROLE_QA, ROLE_REVIEWER
+
+    if not spec or not isinstance(spec, str):
+        raise ValueError(f"--participant must be a non-empty string, got: {spec!r}")
+    parts = spec.split(":")
+    if len(parts) < 3:
+        raise ValueError(
+            f"--participant must be 'type:id:role' (e.g. agent:5:reviewer), got: {spec!r}"
+        )
+    ptype, pid, role, *rest = parts
+    if ptype not in ("agent", "user"):
+        raise ValueError(f"--participant type must be 'agent' or 'user', got: {ptype!r}")
+    try:
+        value = int(pid)
+    except ValueError as e:
+        raise ValueError(f"--participant id must be int, got: {pid!r}") from e
+
+    role_map = {"reviewer": ROLE_REVIEWER, "qa": ROLE_QA}
+    if role in role_map:
+        role_id = role_map[role]
+    elif role == "role":
+        if not rest:
+            raise ValueError(
+                f"--participant 'role:NUMBER' needs a number, got: {spec!r}"
+            )
+        try:
+            role_id = int(rest[0])
+        except ValueError as e:
+            raise ValueError(
+                f"--participant role id must be int, got: {rest[0]!r}"
+            ) from e
+    else:
+        raise ValueError(
+            f"--participant unknown role {role!r}; expected 'reviewer', 'qa', "
+            f"or 'role:NUMBER'"
+        )
+    return {
+        "participable_id": value,
+        "type": ptype,
+        "role_id": role_id,
+    }
+
+
+def _parse_tags(spec: str) -> list[dict[str, Any]]:
+    """Parse the `--tags` sugar into settings.tags[] elements.
+
+    Comma-separated list; each item is `key[:label[:color]]`:
+      backend,urgent            -> [{key:backend}, {key:urgent}]
+      backend:Backend:#ff0000   -> [{key:backend, label:Backend, color:#ff0000}]
+      docs::#0af                -> [{key:docs, color:#0af}]   (empty label skipped)
+
+    Returns the {key, label?, color?} dicts the create-contract-event tool
+    persists under events.settings.tags[].
+    """
+    tags: list[dict[str, Any]] = []
+    for raw in spec.split(","):
+        item = raw.strip()
+        if not item:
+            continue
+        key, _, tail = item.partition(":")
+        key = key.strip()
+        if not key:
+            raise ValueError(f"--tags item needs a key, got: {raw!r}")
+        tag: dict[str, Any] = {"key": key}
+        if tail:
+            label, _, color = tail.partition(":")
+            label = label.strip()
+            color = color.strip()
+            if label:
+                tag["label"] = label
+            if color:
+                tag["color"] = color
+        tags.append(tag)
+    if not tags:
+        raise ValueError(f"--tags produced no tags from: {spec!r}")
+    return tags
+
+
 def _contract_dump(value: Any) -> None:
     if isinstance(value, str):
         sys.stdout.write(value)
@@ -448,8 +535,12 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                 for cid in ids:
                     print(f"--- contract {cid} ---")
                     _contract_dump(cli.tasks(int(cid)))
+            elif action == "my-events":
+                _contract_dump(cli.my_events())
             elif action == "my-jobs":
                 _contract_dump(cli.my_jobs())
+            elif action == "call-human":
+                _contract_dump(cli.call_human(args.event_id, args.kind, args.desc))
             elif action == "task":
                 _contract_dump(cli.task(args.eid))
             elif action == "children":
@@ -464,6 +555,15 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     _err("contract id required (positional or CEKI_CONTRACT_IDS)", "args")
                     return 1
                 data_obj = json.loads(args.data) if args.data else None
+                try:
+                    extra_parts = [
+                        _parse_participant(spec)
+                        for spec in (getattr(args, "participant", None) or [])
+                    ]
+                    tags = _parse_tags(args.tags) if getattr(args, "tags", None) else None
+                except ValueError as e:
+                    _err(str(e), "args")
+                    return 1
                 _contract_dump(cli.create(
                     cid,
                     label=args.label,
@@ -480,11 +580,21 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     description=args.desc,
                     data=data_obj,
                     benefitable=args.benefitable,
+                    reviewer=args.reviewer,
+                    qa=args.qa,
+                    participants=extra_parts or None,
+                    tags=tags,
                 ))
             elif action == "comment":
+                # A comment's body lives in `label` (events.label is
+                # unbounded TEXT). `--label` wins when both are given;
+                # otherwise `--desc` is the body. `description` is never
+                # sent on a comment — the UI would render it on top of
+                # `label` and duplicate the body.
+                body = args.label if args.label is not None else args.desc
                 _contract_dump(cli.comment(
                     args.eid,
-                    label=args.label,
+                    label=body,
                     type_id=args.type,
                     status_id=args.status,
                     start=args.start,
@@ -493,10 +603,13 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     duration=args.duration,
                     amount=args.amount,
                     currency=args.currency,
-                    description=args.desc,
                     benefitable=args.benefitable,
                 ))
             elif action == "propose":
+                tags = _parse_tags(args.tags) if getattr(args, "tags", None) else None
+                settings: dict[str, Any] | None = (
+                    {"tags": tags} if tags else None
+                )
                 _contract_dump(cli.propose(
                     args.eid,
                     status_id=args.status,
@@ -509,6 +622,13 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     amount=args.amount,
                     currency=args.currency,
                     benefitable=args.benefitable,
+                    settings=settings,
+                ))
+            elif action == "progress":
+                _contract_dump(cli.progress(
+                    args.eid,
+                    status=args.status,
+                    desc=args.desc,
                 ))
             elif action == "vote":
                 ids = [int(s) for s in str(args.ids).split(",") if s.strip()]
@@ -748,7 +868,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_ct = csub.add_parser("tasks", help="List contract events (default: CEKI_CONTRACT_IDS)")
     p_ct.add_argument("cid", type=int, nargs="?", help="Contract ID")
 
-    csub.add_parser("my-jobs", help="List events assigned to me")
+    csub.add_parser(
+        "my-events",
+        help=(
+            "List contract events assigned to me (get-my-events). "
+            "The 'plate' feed. Wire tool renamed from get-my-jobs."
+        ),
+    )
+    csub.add_parser(
+        "my-jobs",
+        help=(
+            "List hire schedules I posted, type 3 (get-my-jobs). "
+            "The listings feed. Wire tool reused after the backend swap "
+            "(formerly get-hire-jobs); for contract events use 'my-events'."
+        ),
+    )
 
     p_ctask = csub.add_parser("task", help="Get event")
     p_ctask.add_argument("eid", type=int, help="Event ID")
@@ -779,8 +913,28 @@ def build_parser() -> argparse.ArgumentParser:
     p_cc.add_argument("--amount", type=int)
     p_cc.add_argument("--currency")
     p_cc.add_argument("--benefitable", help="agent:8 or user:61")
+    p_cc.add_argument("--reviewer", help="agent:8 or user:61 (role_id 5 shortcut)")
+    p_cc.add_argument("--qa", help="agent:8 or user:61 (role_id 6 shortcut)")
+    p_cc.add_argument(
+        "--participant",
+        action="append",
+        default=[],
+        dest="participant",
+        help=(
+            "Repeatable. agent:N:reviewer | user:N:qa | agent:N:role:NUMBER. "
+            "Stacks on top of --reviewer/--qa."
+        ),
+    )
     p_cc.add_argument("--desc")
     p_cc.add_argument("--data", help="Extra JSON object passed through as `data`")
+    p_cc.add_argument(
+        "--tags",
+        help=(
+            "Project tags (sugar for settings.tags[]). Comma-separated, each "
+            "item key[:label[:color]]. E.g. 'backend,urgent' or "
+            "'backend:Backend:#ff0000'."
+        ),
+    )
 
     p_cco = csub.add_parser("comment", help="Post comment on event")
     p_cco.add_argument("eid", type=int)
@@ -808,6 +962,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_cp.add_argument("--amount", type=int)
     p_cp.add_argument("--currency")
     p_cp.add_argument("--benefitable")
+    p_cp.add_argument(
+        "--tags",
+        help=(
+            "Project tags (sugar for settings.tags[]). Comma-separated, each "
+            "item key[:label[:color]]. E.g. 'backend,urgent' or "
+            "'backend:Backend:#ff0000'. back/2796 persists onto the event."
+        ),
+    )
+
+    p_cpr = csub.add_parser(
+        "progress",
+        help="Status correction + progress comment (description is not touched)",
+    )
+    p_cpr.add_argument("eid", type=int)
+    p_cpr.add_argument("--status", type=int)
+    p_cpr.add_argument("--desc", required=True)
 
     p_cv = csub.add_parser("vote", help="Vote on correction(s)")
     p_cv.add_argument("eid", type=int)
@@ -818,6 +988,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_cw = csub.add_parser("watch", help="Continuous polling")
     p_cw.add_argument("interval", type=int, nargs="?", default=8, help="Seconds, min 6")
+
+    p_ch = csub.add_parser(
+        "call-human",
+        help="Escalate to a human on an event (input/review/stuck).",
+    )
+    p_ch.add_argument("event_id", type=int)
+    p_ch.add_argument(
+        "--kind",
+        choices=["input", "review", "stuck"],
+        required=True,
+        help="Type of escalation: input | review | stuck.",
+    )
+    p_ch.add_argument(
+        "--desc",
+        required=True,
+        help="Specific question / decision / what was tried.",
+    )
 
     csub.add_parser("tools", help="List available MCP tools")
 

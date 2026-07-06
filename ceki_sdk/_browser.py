@@ -486,6 +486,121 @@ class Browser:
 
         return parsed
 
+    async def _dispatch_hotkey(self, key: str, code: str) -> None:
+        """Dispatch a Ctrl+<key> hotkey as ``keyDown``+``keyUp`` via CDP.
+
+        ``modifiers=2`` is Chromium's bitmask for Control. We fire both
+        ``keyDown`` and ``keyUp`` because the browser's clipboard shortcuts
+        only trigger on a full press cycle. Used by :meth:`copy` (Ctrl+C)
+        and :meth:`paste` (Ctrl+C on the seed textarea, then Ctrl+V on the
+        target).
+        """
+        vk = ord(key.upper())
+        params = {
+            "modifiers": 2,
+            "key": key,
+            "code": code,
+            "windowsVirtualKeyCode": vk,
+            "nativeVirtualKeyCode": vk,
+        }
+        await self.send({
+            "method": "Input.dispatchKeyEvent",
+            "params": {"type": "keyDown", **params},
+        })
+        await self.send({
+            "method": "Input.dispatchKeyEvent",
+            "params": {"type": "keyUp", **params},
+        })
+
+    async def copy(self) -> str:
+        """Copy the current window selection into the OS clipboard, return it.
+
+        Reads the current selection text via ``Runtime.evaluate``
+        (``window.getSelection().toString()``) so the caller still gets it as a
+        return value, then dispatches a synthetic ``Ctrl+C`` via
+        ``Input.dispatchKeyEvent`` — that is the step that actually flips the OS
+        clipboard. Verified against real headed Chromium in contract task 4098.
+
+        The reason we read the selection before Ctrl+C rather than reading it
+        back from the clipboard: the main-mode CDP allowlist forbids
+        ``navigator.clipboard``, and ``document.execCommand('paste')`` is dead
+        in modern Chromium, so there's no read-back path from JS. Reading the
+        selection directly is cheap and gives an exact return value.
+
+        Returns:
+            The selection text (``""`` when nothing is selected). The OS
+            clipboard is flipped as a side effect regardless of the return.
+        """
+        result = await self.send({
+            "method": "Runtime.evaluate",
+            "params": {
+                "expression": "window.getSelection().toString()",
+                "returnByValue": True,
+            },
+        })
+        selection = (result.get("result") or {}).get("value") or ""
+        await self._dispatch_hotkey("c", "KeyC")
+        return selection
+
+    async def paste(self, selector: str, text: str) -> None:
+        """Put ``text`` into the OS clipboard, focus ``selector``, Ctrl+V it in.
+
+        Real system-clipboard paste: a temporary offscreen ``<textarea>`` is
+        created and selected, then a synthetic ``Ctrl+C`` flips the OS
+        clipboard to ``text``. The temp element is removed, the target element
+        is focused, and a synthetic ``Ctrl+V`` fires — which dispatches a real
+        ``ClipboardEvent`` (``paste`` handler + ``input`` event with
+        ``inputType='insertFromPaste'``). Verified against real headed
+        Chromium in contract task 4098.
+
+        Both ``selector`` and ``text`` are JSON-escaped when interpolated into
+        the ``Runtime.evaluate`` expression — quotes, backticks, backslashes,
+        newlines, and unicode are safe.
+
+        Args:
+            selector: CSS selector for the target input / textarea /
+                contentEditable / any focusable element.
+            text: Arbitrary string to paste. Empty string is allowed; it
+                seeds an empty clipboard and Ctrl+V still fires the
+                ``paste`` event.
+
+        Raises:
+            The underlying ``Runtime.evaluate`` will surface a JS TypeError if
+            ``querySelector`` returns ``null`` — the send() call will reject
+            with a CDP error rather than silently swallowing it.
+        """
+        text_lit = json.dumps(text)
+        seed_expr = (
+            "(function(){"
+            "var __ceki_tmp__=document.createElement('textarea');"
+            "__ceki_tmp__.id='__ceki_paste_tmp__';"
+            "__ceki_tmp__.style.cssText='position:fixed;left:-9999px;top:0;opacity:0';"
+            f"__ceki_tmp__.value={text_lit};"
+            "document.body.appendChild(__ceki_tmp__);"
+            "__ceki_tmp__.focus();__ceki_tmp__.select();"
+            "})()"
+        )
+        await self.send({
+            "method": "Runtime.evaluate",
+            "params": {"expression": seed_expr},
+        })
+        await self._dispatch_hotkey("c", "KeyC")
+
+        selector_lit = json.dumps(selector)
+        cleanup_focus_expr = (
+            "(function(){"
+            "var t=document.getElementById('__ceki_paste_tmp__');"
+            "if(t)t.remove();"
+            f"var el=document.querySelector({selector_lit});"
+            "el.focus();"
+            "})()"
+        )
+        await self.send({
+            "method": "Runtime.evaluate",
+            "params": {"expression": cleanup_focus_expr},
+        })
+        await self._dispatch_hotkey("v", "KeyV")
+
     def set_human(self, profile) -> "HumanProfile | None":
         prev = self._humanizer.profile if self._humanizer else None
         self._humanizer = _resolve_human(profile)

@@ -11,6 +11,10 @@ import httpx
 
 from ._config import default_api_url
 
+# Contract role IDs (back/2542 users[] payload — renamed from participants[]).
+ROLE_REVIEWER = 5
+ROLE_QA = 6
+
 
 def _benefitable(value: str | None) -> dict[str, Any] | None:
     if not value:
@@ -20,6 +24,26 @@ def _benefitable(value: str | None) -> dict[str, Any] | None:
         raise ValueError(f"benefitable must be 'type:id', got: {value!r}")
     btype, bid = parts
     return {"type": btype, "value": int(bid)}
+
+
+def _participant(value: str | None, role_id: int) -> dict[str, Any] | None:
+    """Parse 'agent:8' / 'user:61' into {participable_id, type, role_id}.
+
+    Wire shape declared by the create-contract-event MCP tool schema:
+    `participable_id` + `type` (short token: 'agent' or 'user') +
+    `role_id`. The MCP tool drops any field it does not know about, so
+    sending `participable_type` (FQCN) silently loses the type and the
+    backend membership lookup defaults to user → misleading 422
+    "Participant must be a member of the contract". Send `type`.
+    """
+    base = _benefitable(value)
+    if base is None:
+        return None
+    return {
+        "participable_id": base["value"],
+        "type": base["type"],
+        "role_id": role_id,
+    }
 
 
 def _clean(args: dict[str, Any]) -> dict[str, Any]:
@@ -59,10 +83,17 @@ def _resolve_token() -> str:
     return os.getenv("CEKI_AGENT_TOKEN") or os.getenv("CEKI_API_KEY") or ""
 
 
+# Wire names swapped on the backend:
+#   get-my-jobs   (formerly contract tasks)      → get-my-events
+#   get-hire-jobs (formerly posted hire jobs)    → get-my-jobs
+# The two sugar keys reflect the new, non-cross-contaminated semantics:
+#   "my-events" = contract events assigned to me  (the plate feed)
+#   "my-jobs"   = hire schedules I posted (type 3) (the listings feed)
 _TOOL_MAP = {
     "list": "get-my-contracts",
     "members": "get-contract-members",
     "tasks": "get-contract-events",
+    "my-events": "get-my-events",
     "my-jobs": "get-my-jobs",
     "task": "get-event",
     "children": "get-event-children",
@@ -175,7 +206,43 @@ class ContractClient:
     def tasks(self, contract_id: int) -> Any:
         return self.call(_TOOL_MAP["tasks"], {"contract_id": int(contract_id)})
 
+    def my_events(self) -> Any:
+        """Contract events assigned to me — the agent's plate feed.
+
+        Calls `get-my-events` (formerly `get-my-jobs`; backend renamed
+        the wire tool when the listings feed reclaimed `get-my-jobs`).
+        """
+        return self.call(_TOOL_MAP["my-events"], {})
+
+    def call_human(self, event_id: int, kind: str, desc: str) -> Any:
+        """Escalate to a human up the event→parent→contract→schedule chain.
+
+        Args:
+            event_id: id of the event to escalate on (must exist).
+            kind: 'input' | 'review' | 'stuck'.
+            desc: what specifically the caller is stuck on.
+
+        Returns a dict shaped
+        ``{"recipients":[{"user_id","label","reason"},...], "dispatched":<int>,
+        "deep_link":"<url>", "kind":"<kind>"}``.
+        """
+        if kind not in ("input", "review", "stuck"):
+            raise ValueError(
+                f"kind must be 'input' | 'review' | 'stuck', got {kind!r}"
+            )
+        return self.call("call-human", {
+            "event_id": int(event_id),
+            "kind": kind,
+            "desc": desc,
+        })
+
     def my_jobs(self) -> Any:
+        """Hire schedules I posted (type 3) — the listings feed.
+
+        Calls `get-my-jobs` (the wire name was reused for this semantic
+        after the backend swap; previously this method returned contract
+        events — use `my_events()` for that now).
+        """
         return self.call(_TOOL_MAP["my-jobs"], {})
 
     def task(self, event_id: int) -> Any:
@@ -206,7 +273,25 @@ class ContractClient:
         description: str | None = None,
         data: dict[str, Any] | None = None,
         benefitable: str | None = None,
+        reviewer: str | None = None,
+        qa: str | None = None,
+        participants: list[dict[str, Any]] | None = None,
+        tags: list[dict[str, Any]] | None = None,
     ) -> Any:
+        # back/2542: reviewer/qa now live inside users[] (renamed from
+        # participants[]). Element shape unchanged. The `participants`
+        # kwarg name is kept as a stable Python API for callers, but on
+        # the wire it is emitted under the `users` key.
+        users: list[dict[str, Any]] = []
+        rev = _participant(reviewer, ROLE_REVIEWER)
+        if rev is not None:
+            users.append(rev)
+        qa_p = _participant(qa, ROLE_QA)
+        if qa_p is not None:
+            users.append(qa_p)
+        if participants:
+            users.extend(participants)
+
         args = _clean({
             "contract_id": int(contract_id),
             "label": label,
@@ -223,6 +308,11 @@ class ContractClient:
             "description": description,
             "data": data,
             "benefitable": _benefitable(benefitable),
+            "users": users if users else None,
+            # back/3165: project tags live in events.settings.tags[]. `tags`
+            # is CLI/SDK sugar — a bare list of {key,label?,color?} dicts —
+            # emitted on the wire under the `settings` blob the backend expects.
+            "settings": {"tags": tags} if tags else None,
         })
         return self.call(_TOOL_MAP["create"], args)
 
@@ -239,9 +329,16 @@ class ContractClient:
         duration: int | None = None,
         amount: int | None = None,
         currency: str | None = None,
-        description: str | None = None,
         benefitable: str | None = None,
     ) -> Any:
+        """Post a comment event.
+
+        The comment body lives entirely in `label` (events.label is
+        unbounded TEXT). `description` is deliberately NOT exposed: the
+        web UI renders both `label` and `description` on a comment, and
+        the human-typed path only writes to `label`. Passing both would
+        produce a visible duplicate in the renderer.
+        """
         args = _clean({
             "event_id": int(event_id),
             "label": label,
@@ -253,7 +350,6 @@ class ContractClient:
             "duration": duration,
             "amount": amount,
             "currency": currency,
-            "description": description,
             "benefitable": _benefitable(benefitable),
         })
         return self.call(_TOOL_MAP["comment"], args)
@@ -272,6 +368,7 @@ class ContractClient:
         amount: int | None = None,
         currency: str | None = None,
         benefitable: str | None = None,
+        settings: dict[str, Any] | None = None,
     ) -> Any:
         args = _clean({
             "event_id": int(event_id),
@@ -285,8 +382,36 @@ class ContractClient:
             "amount": amount,
             "currency": currency,
             "benefitable": _benefitable(benefitable),
+            # back/2796: ProposeCorrectionTool persists settings (tags,
+            # reply_to, blocked_by, do_after) onto the event. Forwarded
+            # verbatim — only attached when the caller supplies it.
+            "settings": settings,
         })
         return self.call(_TOOL_MAP["propose"], args)
+
+    def progress(
+        self,
+        event_id: int,
+        *,
+        status: int | None = None,
+        desc: str,
+    ) -> dict[str, Any]:
+        """Status correction (optional) + progress comment in one shot.
+
+        The event's own description is NOT touched. `--desc` becomes the
+        body of a child comment-event, not a label/description overwrite
+        on the parent event. Use this for Hand/QA/Reviewer progress
+        reports — `propose --desc` would clobber the parent spec.
+        """
+        status_result: Any = None
+        if status is not None:
+            status_result = self.propose(event_id, status_id=int(status))
+        # events.label is unbounded TEXT — the full body lives there, and
+        # `description` is never set on a comment (the UI renders both,
+        # which would duplicate the body for SDK-posted comments).
+        label = desc if (desc or "").strip() else "progress"
+        comment_result = self.comment(event_id, label=label)
+        return {"status_correction": status_result, "comment": comment_result}
 
     def vote(self, event_id: int, ids: list[int], vote: bool) -> Any:
         return self.call(_TOOL_MAP["vote"], {
