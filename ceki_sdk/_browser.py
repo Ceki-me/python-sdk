@@ -6,6 +6,7 @@ import json
 import logging
 import mimetypes
 import os
+import random
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Coroutine, Literal, cast
@@ -40,6 +41,17 @@ SimpleCallback = Callable[[], Awaitable[None]]
 UserEventCallback = Callable[[list[dict[str, Any]]], Awaitable[None]]
 
 _ERROR_TERMINAL = {-1011, -1012, -1015, -1018}
+
+# task 4109 — anti-detect branching for Browser.type().
+# When both gates pass, a long text-with-selector call routes through the
+# real system-clipboard Ctrl+V path (from task 4098) instead of the per-key
+# Ceki.typeText path. Perfect per-key rhythm on a long string is a classic
+# bot signal; a paste event with inputType=insertFromPaste looks like the
+# normal "user pasted from clipboard" behavior. Named constants live here
+# (not inside the method) so tests can pin them and future tuning does not
+# leave magic numbers in two places.
+TYPE_PASTE_MIN_CHARS = 500
+TYPE_PASTE_PROBABILITY = 0.625
 
 
 def _resolve_human(human) -> Humanizer | None:
@@ -279,6 +291,33 @@ class Browser:
         # because Chrome routed the bare CDP eval to the page's service-worker
         # execution context where `document` is undefined. chrome.scripting
         # always lands in a page frame.
+        #
+        # task 4109 — anti-detect branching. For LONG text delivered into a
+        # KNOWN selector, roll the dice against TYPE_PASTE_PROBABILITY and (if
+        # the gate opens) route through the real-clipboard Ctrl+V path from
+        # task 4098 instead of Ceki.typeText. Reasons this branch is gated on
+        # both `selector` and length:
+        #   - no selector => we don't know where to focus for the OS paste,
+        #     so the per-char path (which types into current focus) is the
+        #     only sane fallback;
+        #   - short text has no rhythm-signature problem to begin with, and
+        #     paste-events on short strings look weirder than per-key ones.
+        # Humanizer pre-click / after-hooks still run — the selector focus
+        # inside _hotkey_paste_into replaces the extension's focus step for
+        # this branch.
+        if (
+            selector is not None
+            and len(text) > TYPE_PASTE_MIN_CHARS
+            and random.random() < TYPE_PASTE_PROBABILITY
+        ):
+            h_pre = self._humanize_for_call(human)
+            if h_pre:
+                await h_pre.before("type")
+            await self._hotkey_paste_into(selector, text)
+            if h_pre:
+                await h_pre.after("type")
+            return
+
         h = self._humanize_for_call(human)
         if h:
             if self._last_pointer is not None and selector is None:
@@ -542,32 +581,25 @@ class Browser:
         await self._dispatch_hotkey("c", "KeyC")
         return selection
 
-    async def paste(self, selector: str, text: str) -> None:
-        """Put ``text`` into the OS clipboard, focus ``selector``, Ctrl+V it in.
+    async def _hotkey_paste_into(self, selector: str, text: str) -> None:
+        """Real system-clipboard paste of ``text`` into ``selector``.
 
-        Real system-clipboard paste: a temporary offscreen ``<textarea>`` is
-        created and selected, then a synthetic ``Ctrl+C`` flips the OS
-        clipboard to ``text``. The temp element is removed, the target element
-        is focused, and a synthetic ``Ctrl+V`` fires — which dispatches a real
-        ``ClipboardEvent`` (``paste`` handler + ``input`` event with
-        ``inputType='insertFromPaste'``). Verified against real headed
-        Chromium in contract task 4098.
+        Shared 6-CDP-call sequence (from task 4098):
 
-        Both ``selector`` and ``text`` are JSON-escaped when interpolated into
-        the ``Runtime.evaluate`` expression — quotes, backticks, backslashes,
-        newlines, and unicode are safe.
+          1. Runtime.evaluate — build offscreen ``<textarea>``, set value, focus+select
+          2. Input.dispatchKeyEvent keyDown ``c`` (Ctrl+C — flips OS clipboard)
+          3. Input.dispatchKeyEvent keyUp   ``c``
+          4. Runtime.evaluate — remove temp element, focus target selector
+          5. Input.dispatchKeyEvent keyDown ``v`` (Ctrl+V — fires paste event)
+          6. Input.dispatchKeyEvent keyUp   ``v``
 
-        Args:
-            selector: CSS selector for the target input / textarea /
-                contentEditable / any focusable element.
-            text: Arbitrary string to paste. Empty string is allowed; it
-                seeds an empty clipboard and Ctrl+V still fires the
-                ``paste`` event.
+        Both ``selector`` and ``text`` are JSON-escaped when interpolated —
+        quotes, backticks, backslashes, newlines, and unicode are safe.
 
-        Raises:
-            The underlying ``Runtime.evaluate`` will surface a JS TypeError if
-            ``querySelector`` returns ``null`` — the send() call will reject
-            with a CDP error rather than silently swallowing it.
+        Called by :meth:`paste` (public API) and :meth:`type` (task 4109
+        anti-detect branch for long text). Extracting this keeps the two
+        callers wire-identical and avoids the copy() logging noise inside a
+        type() call.
         """
         text_lit = json.dumps(text)
         seed_expr = (
@@ -600,6 +632,35 @@ class Browser:
             "params": {"expression": cleanup_focus_expr},
         })
         await self._dispatch_hotkey("v", "KeyV")
+
+    async def paste(self, selector: str, text: str) -> None:
+        """Put ``text`` into the OS clipboard, focus ``selector``, Ctrl+V it in.
+
+        Real system-clipboard paste: a temporary offscreen ``<textarea>`` is
+        created and selected, then a synthetic ``Ctrl+C`` flips the OS
+        clipboard to ``text``. The temp element is removed, the target element
+        is focused, and a synthetic ``Ctrl+V`` fires — which dispatches a real
+        ``ClipboardEvent`` (``paste`` handler + ``input`` event with
+        ``inputType='insertFromPaste'``). Verified against real headed
+        Chromium in contract task 4098.
+
+        Both ``selector`` and ``text`` are JSON-escaped when interpolated into
+        the ``Runtime.evaluate`` expression — quotes, backticks, backslashes,
+        newlines, and unicode are safe.
+
+        Args:
+            selector: CSS selector for the target input / textarea /
+                contentEditable / any focusable element.
+            text: Arbitrary string to paste. Empty string is allowed; it
+                seeds an empty clipboard and Ctrl+V still fires the
+                ``paste`` event.
+
+        Raises:
+            The underlying ``Runtime.evaluate`` will surface a JS TypeError if
+            ``querySelector`` returns ``null`` — the send() call will reject
+            with a CDP error rather than silently swallowing it.
+        """
+        await self._hotkey_paste_into(selector, text)
 
     def set_human(self, profile) -> "HumanProfile | None":
         prev = self._humanizer.profile if self._humanizer else None
