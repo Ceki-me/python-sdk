@@ -204,15 +204,79 @@ class ContractClient:
         return self.call(_TOOL_MAP["members"], {"contract_id": int(contract_id)})
 
     def tasks(self, contract_id: int) -> Any:
-        return self.call(_TOOL_MAP["tasks"], {"contract_id": int(contract_id)})
+        """List contract events — auto-paginates ALL pages.
+
+        Backend returns paginated ({data, current_page, last_page, total,
+        per_page}); the old single-call returned only page 1 (50 of N),
+        silently truncating. We follow last_page and merge data[].
+        """
+        cid = int(contract_id)
+        tool = _TOOL_MAP["tasks"]
+        out = self.call(tool, {"contract_id": cid})
+        if not isinstance(out, dict) or not isinstance(out.get("data"), list):
+            return out
+        page = int(out.get("current_page", 1) or 1)
+        last = int(out.get("last_page", 1) or 1)
+        merged = list(out["data"])
+        while page < last:
+            page += 1
+            nxt = self.call(tool, {"contract_id": cid, "page": page})
+            if not isinstance(nxt, dict) or not isinstance(nxt.get("data"), list):
+                break
+            merged.extend(nxt["data"])
+            last = int(nxt.get("last_page", last) or last)  # safety if backend shifts
+        # dedup by id — backend pagination occasionally overlaps pages
+        seen: set[Any] = set()
+        uniq: list[Any] = []
+        for e in merged:
+            eid = e.get("id") if isinstance(e, dict) else None
+            if eid is None or eid not in seen:
+                if eid is not None:
+                    seen.add(eid)
+                uniq.append(e)
+        out = dict(out)
+        out["data"] = uniq
+        out["current_page"] = 1
+        out["last_page"] = 1
+        out["per_page"] = len(uniq)
+        return out
 
     def my_events(self) -> Any:
         """Contract events assigned to me — the agent's plate feed.
 
         Calls `get-my-events` (formerly `get-my-jobs`; backend renamed
         the wire tool when the listings feed reclaimed `get-my-jobs`).
+        Auto-paginates ALL pages.
         """
-        return self.call(_TOOL_MAP["my-events"], {})
+        tool = _TOOL_MAP["my-events"]
+        out = self.call(tool, {})
+        if not isinstance(out, dict) or not isinstance(out.get("data"), list):
+            return out
+        page = int(out.get("current_page", 1) or 1)
+        last = int(out.get("last_page", 1) or 1)
+        merged = list(out["data"])
+        while page < last:
+            page += 1
+            nxt = self.call(tool, {"page": page})
+            if not isinstance(nxt, dict) or not isinstance(nxt.get("data"), list):
+                break
+            merged.extend(nxt["data"])
+            last = int(nxt.get("last_page", last) or last)  # safety if backend shifts
+        # dedup by id — backend pagination occasionally overlaps pages
+        seen: set[Any] = set()
+        uniq: list[Any] = []
+        for e in merged:
+            eid = e.get("id") if isinstance(e, dict) else None
+            if eid is None or eid not in seen:
+                if eid is not None:
+                    seen.add(eid)
+                uniq.append(e)
+        out = dict(out)
+        out["data"] = uniq
+        out["current_page"] = 1
+        out["last_page"] = 1
+        out["per_page"] = len(uniq)
+        return out
 
     def call_human(self, event_id: int, kind: str, desc: str) -> Any:
         """Escalate to a human up the event→parent→contract→schedule chain.
@@ -242,8 +306,37 @@ class ContractClient:
         Calls `get-my-jobs` (the wire name was reused for this semantic
         after the backend swap; previously this method returned contract
         events — use `my_events()` for that now).
+        Auto-paginates ALL pages.
         """
-        return self.call(_TOOL_MAP["my-jobs"], {})
+        tool = _TOOL_MAP["my-jobs"]
+        out = self.call(tool, {})
+        if not isinstance(out, dict) or not isinstance(out.get("data"), list):
+            return out
+        page = int(out.get("current_page", 1) or 1)
+        last = int(out.get("last_page", 1) or 1)
+        merged = list(out["data"])
+        while page < last:
+            page += 1
+            nxt = self.call(tool, {"page": page})
+            if not isinstance(nxt, dict) or not isinstance(nxt.get("data"), list):
+                break
+            merged.extend(nxt["data"])
+            last = int(nxt.get("last_page", last) or last)  # safety if backend shifts
+        # dedup by id — backend pagination occasionally overlaps pages
+        seen: set[Any] = set()
+        uniq: list[Any] = []
+        for e in merged:
+            eid = e.get("id") if isinstance(e, dict) else None
+            if eid is None or eid not in seen:
+                if eid is not None:
+                    seen.add(eid)
+                uniq.append(e)
+        out = dict(out)
+        out["data"] = uniq
+        out["current_page"] = 1
+        out["last_page"] = 1
+        out["per_page"] = len(uniq)
+        return out
 
     def task(self, event_id: int) -> Any:
         return self.call(_TOOL_MAP["task"], {"event_id": int(event_id)})
