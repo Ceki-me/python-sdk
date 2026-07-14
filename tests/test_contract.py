@@ -215,17 +215,51 @@ def test_comment_long_multiline_body_in_label_no_description():
     assert "description" not in args
 
 
-def test_comment_no_description_kwarg():
-    """The comment() public API must not accept `description=`.
+def test_comment_accepts_description_with_split():
+    """comment() now accepts description and splits long text (>1024).
 
-    Dropping this kwarg is the API-level breaking change for 2.30.0:
-    a comment's body lives in `label`. Anyone still passing
-    `description=` gets a TypeError at call time, which is the loud
-    failure we want.
+    Tests that:
+    - Both label and description are accepted.
+    - When label > 1024, it's split at word boundary.
+    - When description > 1024, it's split at word boundary.
+    - When both present and under limit, they're passed as-is.
     """
-    c = ContractClient(endpoint="http://x/mcp/agent", token="t")
-    with pytest.raises(TypeError):
-        c.comment(99, label="x", description="y")  # type: ignore[call-arg]
+    http, _ = _http_mock(_mcp_text({}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+
+    # Short label and description - passed as-is
+    c.comment(99, label="short label", description="short description")
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["label"] == "short label"
+    assert args["description"] == "short description"
+
+    # Long label (>1024) - split at word boundary
+    long_label = "a" * 1000 + " " + "b" * 100
+    http, _ = _http_mock(_mcp_text({}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.comment(99, label=long_label)
+    args = _captured_body(http)["params"]["arguments"]
+    # Should be split - label ≈ 1024, description gets the rest
+    assert len(args["label"]) <= 1024
+    assert args["description"] == "b" * 100
+
+    # Long description (>1024) - split at word boundary
+    long_desc = "c" * 1000 + " " + "d" * 100
+    http, _ = _http_mock(_mcp_text({}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.comment(99, description=long_desc)
+    args = _captured_body(http)["params"]["arguments"]
+    # Should be split - label ≈ 1024, description gets the rest
+    assert len(args["label"]) <= 1024
+    assert args["description"] == "d" * 100
+
+    # Both present and under limit - no split
+    http, _ = _http_mock(_mcp_text({}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.comment(99, label="label", description="desc")
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["label"] == "label"
+    assert args["description"] == "desc"
 
 
 def test_propose_maps_tool():

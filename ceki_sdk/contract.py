@@ -50,6 +50,60 @@ def _clean(args: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in args.items() if v is not None}
 
 
+def _word_boundary(text: str, limit: int) -> int:
+    """Find the last space position before limit for clean word break.
+
+    Returns the index of the last space within `limit`, or `limit` itself
+    if no space is found (forces a hard cut). Used to avoid splitting
+    mid-word when truncating long text.
+    """
+    i = text.rfind(" ", 0, limit)
+    return i if i > 0 else limit
+
+
+def _split_label_desc(
+    label: str | None, description: str | None, limit: int = 1024
+) -> tuple[str | None, str | None]:
+    """Split long text between label and description at word boundary.
+
+    Rules:
+    - Both present (label AND description): returned as-is.
+    - Only label: len<=limit → (label, None); >limit → cut at word boundary,
+      return (label[:cut], label[cut:].strip()).
+    - Only description (no label): len<=limit → (description, None);
+      >limit → cut at word boundary, return (desc[:cut], desc[cut:].strip()).
+    - Both None: (None, None).
+
+    Args:
+        label: Primary text (events.label).
+        description: Secondary text (events.description).
+        limit: Max length for the first component before split (default 1024).
+
+    Returns:
+        (label_out, description_out) where label_out is at most `limit`
+        characters (cut at word boundary when splitting).
+    """
+    if label is not None and description is not None:
+        # Both explicitly provided – send as-is
+        return label, description
+
+    if label is not None:
+        if len(label) <= limit:
+            return label, None
+        # Too long – split at word boundary
+        cut = _word_boundary(label, limit)
+        return label[:cut], label[cut:].strip() or None
+
+    if description is not None:
+        if len(description) <= limit:
+            return description, None
+        # Too long – split at word boundary
+        cut = _word_boundary(description, limit)
+        return description[:cut], description[cut:].strip() or None
+
+    return None, None
+
+
 def contract_ids_from_env() -> list[str]:
     raw = (os.getenv("CEKI_CONTRACT_IDS") or "").strip()
     if not raw:
@@ -204,15 +258,79 @@ class ContractClient:
         return self.call(_TOOL_MAP["members"], {"contract_id": int(contract_id)})
 
     def tasks(self, contract_id: int) -> Any:
-        return self.call(_TOOL_MAP["tasks"], {"contract_id": int(contract_id)})
+        """List contract events — auto-paginates ALL pages.
+
+        Backend returns paginated ({data, current_page, last_page, total,
+        per_page}); the old single-call returned only page 1 (50 of N),
+        silently truncating. We follow last_page and merge data[].
+        """
+        cid = int(contract_id)
+        tool = _TOOL_MAP["tasks"]
+        out = self.call(tool, {"contract_id": cid})
+        if not isinstance(out, dict) or not isinstance(out.get("data"), list):
+            return out
+        page = int(out.get("current_page", 1) or 1)
+        last = int(out.get("last_page", 1) or 1)
+        merged = list(out["data"])
+        while page < last:
+            page += 1
+            nxt = self.call(tool, {"contract_id": cid, "page": page})
+            if not isinstance(nxt, dict) or not isinstance(nxt.get("data"), list):
+                break
+            merged.extend(nxt["data"])
+            last = int(nxt.get("last_page", last) or last)  # safety if backend shifts
+        # dedup by id — backend pagination occasionally overlaps pages
+        seen: set[Any] = set()
+        uniq: list[Any] = []
+        for e in merged:
+            eid = e.get("id") if isinstance(e, dict) else None
+            if eid is None or eid not in seen:
+                if eid is not None:
+                    seen.add(eid)
+                uniq.append(e)
+        out = dict(out)
+        out["data"] = uniq
+        out["current_page"] = 1
+        out["last_page"] = 1
+        out["per_page"] = len(uniq)
+        return out
 
     def my_events(self) -> Any:
         """Contract events assigned to me — the agent's plate feed.
 
         Calls `get-my-events` (formerly `get-my-jobs`; backend renamed
         the wire tool when the listings feed reclaimed `get-my-jobs`).
+        Auto-paginates ALL pages.
         """
-        return self.call(_TOOL_MAP["my-events"], {})
+        tool = _TOOL_MAP["my-events"]
+        out = self.call(tool, {})
+        if not isinstance(out, dict) or not isinstance(out.get("data"), list):
+            return out
+        page = int(out.get("current_page", 1) or 1)
+        last = int(out.get("last_page", 1) or 1)
+        merged = list(out["data"])
+        while page < last:
+            page += 1
+            nxt = self.call(tool, {"page": page})
+            if not isinstance(nxt, dict) or not isinstance(nxt.get("data"), list):
+                break
+            merged.extend(nxt["data"])
+            last = int(nxt.get("last_page", last) or last)  # safety if backend shifts
+        # dedup by id — backend pagination occasionally overlaps pages
+        seen: set[Any] = set()
+        uniq: list[Any] = []
+        for e in merged:
+            eid = e.get("id") if isinstance(e, dict) else None
+            if eid is None or eid not in seen:
+                if eid is not None:
+                    seen.add(eid)
+                uniq.append(e)
+        out = dict(out)
+        out["data"] = uniq
+        out["current_page"] = 1
+        out["last_page"] = 1
+        out["per_page"] = len(uniq)
+        return out
 
     def call_human(self, event_id: int, kind: str, desc: str) -> Any:
         """Escalate to a human up the event→parent→contract→schedule chain.
@@ -242,8 +360,37 @@ class ContractClient:
         Calls `get-my-jobs` (the wire name was reused for this semantic
         after the backend swap; previously this method returned contract
         events — use `my_events()` for that now).
+        Auto-paginates ALL pages.
         """
-        return self.call(_TOOL_MAP["my-jobs"], {})
+        tool = _TOOL_MAP["my-jobs"]
+        out = self.call(tool, {})
+        if not isinstance(out, dict) or not isinstance(out.get("data"), list):
+            return out
+        page = int(out.get("current_page", 1) or 1)
+        last = int(out.get("last_page", 1) or 1)
+        merged = list(out["data"])
+        while page < last:
+            page += 1
+            nxt = self.call(tool, {"page": page})
+            if not isinstance(nxt, dict) or not isinstance(nxt.get("data"), list):
+                break
+            merged.extend(nxt["data"])
+            last = int(nxt.get("last_page", last) or last)  # safety if backend shifts
+        # dedup by id — backend pagination occasionally overlaps pages
+        seen: set[Any] = set()
+        uniq: list[Any] = []
+        for e in merged:
+            eid = e.get("id") if isinstance(e, dict) else None
+            if eid is None or eid not in seen:
+                if eid is not None:
+                    seen.add(eid)
+                uniq.append(e)
+        out = dict(out)
+        out["data"] = uniq
+        out["current_page"] = 1
+        out["last_page"] = 1
+        out["per_page"] = len(uniq)
+        return out
 
     def task(self, event_id: int) -> Any:
         return self.call(_TOOL_MAP["task"], {"event_id": int(event_id)})
@@ -321,6 +468,7 @@ class ContractClient:
         event_id: int,
         *,
         label: str | None = None,
+        description: str | None = None,
         type_id: int | None = None,
         status_id: int | None = None,
         start: str | None = None,
@@ -333,15 +481,18 @@ class ContractClient:
     ) -> Any:
         """Post a comment event.
 
-        The comment body lives entirely in `label` (events.label is
-        unbounded TEXT). `description` is deliberately NOT exposed: the
-        web UI renders both `label` and `description` on a comment, and
-        the human-typed path only writes to `label`. Passing both would
-        produce a visible duplicate in the renderer.
+        The comment body lives primarily in `label` (events.label is
+        unbounded TEXT). `description` is now supported: when a long
+        label or description is provided (>1024 chars), the text is split
+        at a word boundary – the first part goes to `label`, the remainder
+        to `description`. This matches backend API behavior and keeps
+        the UI clean without visible duplication.
         """
+        label_out, desc_out = _split_label_desc(label, description)
         args = _clean({
             "event_id": int(event_id),
-            "label": label,
+            "label": label_out,
+            "description": desc_out,
             "type_id": type_id,
             "status_id": status_id,
             "start": start,
@@ -370,11 +521,12 @@ class ContractClient:
         benefitable: str | None = None,
         settings: dict[str, Any] | None = None,
     ) -> Any:
+        label_out, desc_out = _split_label_desc(label, description)
         args = _clean({
             "event_id": int(event_id),
             "status_id": status_id,
-            "label": label,
-            "description": description,
+            "label": label_out,
+            "description": desc_out,
             "start": start,
             "end": end,
             "date": date,
