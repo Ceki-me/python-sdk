@@ -538,6 +538,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
             elif action == "my-events":
                 _contract_dump(cli.my_events())
             elif action == "my-jobs":
+                print("⚠️  [DEPRECATED] use `ceki hire my-jobs` instead", file=sys.stderr)
                 _contract_dump(cli.my_jobs())
             elif action == "call-human":
                 _contract_dump(cli.call_human(args.event_id, args.kind, args.desc))
@@ -664,6 +665,20 @@ def _cmd_contract(args: argparse.Namespace) -> int:
         _err(str(e), "contract")
         return 1
     return 0
+
+
+def _cmd_hire(args: argparse.Namespace) -> int:
+    from .contract import ContractClient
+
+    action = args.hire_action
+    try:
+        with _contract_client() as cli:
+            if action == "my-jobs":
+                _contract_dump(cli.my_jobs())
+        return 0
+    except Exception as e:
+        _err(str(e), "error")
+        return 1
 
 
 def _cmd_timelog(args: argparse.Namespace) -> int:
@@ -859,6 +874,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_contract = sub.add_parser("contract", help="Participate in contracts via /mcp/agent")
     csub = p_contract.add_subparsers(dest="contract_action", required=True)
+
+    p_hire = sub.add_parser("hire", help="Hire schedule commands (my-jobs)")
+    hsub = p_hire.add_subparsers(dest="hire_action", required=True)
+
+    hsub.add_parser(
+        "my-jobs",
+        help=(
+            "List hire schedules I posted, type 3 (get-my-jobs). "
+            "The listings feed."
+        ),
+    )
 
     csub.add_parser("list", help="List my contracts (get-my-contracts)")
 
@@ -1062,6 +1088,9 @@ def main() -> None:
 
     if args.command == "contract":
         sys.exit(_cmd_contract(args))
+
+    if args.command == "hire":
+        sys.exit(_cmd_hire(args))
 
     if args.command == "timelog":
         sys.exit(_cmd_timelog(args))
