@@ -335,9 +335,15 @@ def test_parser_contract_my_events():
 
 
 def test_parser_contract_my_jobs_still_present():
-    """`contract my-jobs` is still a valid CLI action (now hire schedules)."""
+    """`contract my-jobs` is still a valid CLI action (deprecated alias)."""
     a = build_parser().parse_args(["contract", "my-jobs"])
     assert a.command == "contract" and a.contract_action == "my-jobs"
+
+
+def test_parser_hire_my_jobs():
+    """`hire my-jobs` is the new canonical CLI path."""
+    a = build_parser().parse_args(["hire", "my-jobs"])
+    assert a.command == "hire" and a.hire_action == "my-jobs"
 
 
 # ── polling ───────────────────────────────────────────────────────
