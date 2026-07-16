@@ -557,7 +557,12 @@ class ContractClient:
         """
         status_result: Any = None
         if status is not None:
-            status_result = self.propose(event_id, status_id=int(status))
+            try:
+                status_result = self.propose(event_id, status_id=int(status))
+            except ContractError as exc:
+                # If propose fails (e.g. invalid transition, voting rules),
+                # still post the progress comment so --desc text is not lost.
+                status_result = {"error": str(exc)}
         # events.label is unbounded TEXT — the full body lives there, and
         # `description` is never set on a comment (the UI renders both,
         # which would duplicate the body for SDK-posted comments).
