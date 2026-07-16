@@ -587,15 +587,25 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     tags=tags,
                 ))
             elif action == "comment":
-                # A comment's body lives in `label` (events.label is
-                # unbounded TEXT). `--label` wins when both are given;
-                # otherwise `--desc` is the body. `description` is never
-                # sent on a comment — the UI would render it on top of
-                # `label` and duplicate the body.
-                body = args.label if args.label is not None else args.desc
+                # `--label` → label (short header), `--desc` → description
+                # (long body). When only one is given it goes to label for
+                # backward compatibility; when both are given desc feeds the
+                # description field.
+                label = args.label
+                if label is not None:
+                    # --label given: use --desc as description
+                    description = args.desc
+                else:
+                    # Only --desc (or neither): body goes to label
+                    label = args.desc
+                    description = None
+                if label is None:
+                    _contract_dump({"error": "provide --label or --desc"})
+                    return
                 _contract_dump(cli.comment(
                     args.eid,
-                    label=body,
+                    label=label,
+                    description=description,
                     type_id=args.type,
                     status_id=args.status,
                     start=args.start,
