@@ -271,6 +271,26 @@ def test_propose_maps_tool():
     assert body["params"]["arguments"] == {"event_id": 7, "status_id": 200, "label": "L"}
 
 
+def test_propose_desc_maps_to_description():
+    """--desc alone maps to description, NOT label (BUG FIX)."""
+    http, _ = _http_mock(_mcp_text({}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.propose(7, description="my desc")
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["description"] == "my desc"
+    assert "label" not in args
+
+
+def test_propose_label_and_description_together():
+    """--label + --desc both go to their own fields."""
+    http, _ = _http_mock(_mcp_text({}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.propose(7, label="L", description="D")
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["label"] == "L"
+    assert args["description"] == "D"
+
+
 def test_vote_payload_shape():
     http, _ = _http_mock(_mcp_text({}))
     c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")

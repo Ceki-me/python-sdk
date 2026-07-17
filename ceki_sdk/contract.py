@@ -521,12 +521,14 @@ class ContractClient:
         benefitable: str | None = None,
         settings: dict[str, Any] | None = None,
     ) -> Any:
-        label_out, desc_out = _split_label_desc(label, description)
+        # propose is a correction/PATCH — label and description are independent
+        # fields. Do NOT use _split_label_desc (which maps desc→label when label
+        # is absent) — that would make --desc set the label instead of description.
         args = _clean({
             "event_id": int(event_id),
             "status_id": status_id,
-            "label": label_out,
-            "description": desc_out,
+            "label": label,
+            "description": description,
             "start": start,
             "end": end,
             "date": date,
