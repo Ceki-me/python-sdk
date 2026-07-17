@@ -51,8 +51,8 @@ Ceki speaks raw **CDP (Chrome DevTools Protocol)** — the same protocol Playwri
 - **Playwright** — `page.context.newCDPSession(page)` → `client.rent()`, then replace `cdp_session.send('DOM.getDocument')` with `browser.send({"method": "DOM.getDocument"})`. Navigation, clicking, typing, and DOM queries work identically.
 - **Puppeteer** — `page._client().send('DOM.getDocument')` → `browser.send({"method": "DOM.getDocument"})`. Same CDP method names and params.
 - **Selenium** — `driver.execute_cdp_cmd('DOM.getDocument', {})` → `browser.send({"method": "DOM.getDocument"})`. Same method names, same parameter shapes.
-- **undetected-chromedriver** — больше не нужен. Ceki предоставляет реальный fingerprint браузера реального человека + резидентный IP. Никаких патчей WebDriver.
-- **selenium-wire** — перехват запросов: `browser.send({"method": "Network.enable"})` + подписка на событие `Network.responseReceived`.
+- **undetected-chromedriver** — no longer needed. Ceki provides a real human browser fingerprint + residential IP. No WebDriver patches required.
+- **selenium-wire** — request interception: `browser.send({"method": "Network.enable"})` + subscribe to `Network.responseReceived` events.
 - **MCP** — Ceki is MCP-native. Connect it as an MCP server (`ceki mcp`), and any MCP client (Claude Code, Cline, Cursor) gets browser tools — navigate, click, type, screenshot, captcha chat — without writing a single line of CDP code.
 
 ### Migration example: Playwright → Ceki (Python)
@@ -98,6 +98,15 @@ async def main():
 </table>
 
 The `browser.send({"method": ..., "params": ...})` method mirrors Playwright's `CDPSession.send()` — same CDP method names, same parameter shapes. Only the connection setup changes.
+
+### Known Differences
+
+Ceki's CDP-over-WSS relay is not a direct local CDP pipe — a few differences to keep in mind when migrating from Playwright / Puppeteer / Selenium:
+
+- **No CSS selectors on interaction methods** — `click`, `type`, and `scroll` take viewport coordinates, not CSS selectors. For element-based selection, use `Runtime.evaluate` to get bounding rects, then pass coordinates.
+- **Speed** — each command travels over the WebSocket relay with ~50–200ms round-trip (internet-latency dependent, unlike local CDP which is sub-millisecond). Batch operations in a single `Runtime.evaluate` where possible, rather than chaining many small CDP calls.
+- **120s grace window** — after each command there's a 120s window before the session auto-closes. This is by design for workflow chaining, but long-running idle sessions will need a keepalive.
+- **Runtime.evaluate serialization** — CDP's `Runtime.evaluate` returns JSON-serializable values only. Functions, symbols, DOM nodes, and circular references are not transferable. Use `--returnByValue` explicitly.
 
 ## Environment Variables
 
