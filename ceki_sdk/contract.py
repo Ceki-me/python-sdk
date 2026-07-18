@@ -19,6 +19,9 @@ ROLE_QA = 6
 def _benefitable(value: str | None) -> dict[str, Any] | None:
     if not value:
         return None
+    # Support creator/owner markers (resolved later by _resolve_users)
+    if value in ("creator", "owner"):
+        return {"type": value, "value": 0}
     parts = str(value).split(":", 1)
     if len(parts) != 2:
         raise ValueError(f"benefitable must be 'type:id', got: {value!r}")
@@ -35,10 +38,21 @@ def _participant(value: str | None, role_id: int) -> dict[str, Any] | None:
     sending `participable_type` (FQCN) silently loses the type and the
     backend membership lookup defaults to user → misleading 422
     "Participant must be a member of the contract". Send `type`.
+
+    Also accepts 'creator' and 'owner' markers (resolved later by
+    _resolve_users).
     """
     base = _benefitable(value)
     if base is None:
         return None
+    # Creator/owner markers pass through with participable_id=0
+    # for later resolution in _resolve_users.
+    if base["type"] in ("creator", "owner"):
+        return {
+            "participable_id": base["value"],
+            "type": base["type"],
+            "role_id": role_id,
+        }
     return {
         "participable_id": base["value"],
         "type": base["type"],
@@ -438,6 +452,7 @@ class ContractClient:
             users.append(qa_p)
         if participants:
             users.extend(participants)
+        resolved_users = self._resolve_users(users, contract_id=contract_id)
 
         args = _clean({
             "contract_id": int(contract_id),
@@ -455,7 +470,7 @@ class ContractClient:
             "description": description,
             "data": data,
             "benefitable": _benefitable(benefitable),
-            "users": users if users else None,
+            "users": resolved_users if resolved_users else None,
             # back/3165: project tags live in events.settings.tags[]. `tags`
             # is CLI/SDK sugar — a bare list of {key,label?,color?} dicts —
             # emitted on the wire under the `settings` blob the backend expects.
@@ -520,13 +535,31 @@ class ContractClient:
         currency: str | None = None,
         benefitable: str | None = None,
         settings: dict[str, Any] | None = None,
+        reviewer: str | None = None,
+        qa: str | None = None,
+        participants: list[dict[str, Any]] | None = None,
     ) -> Any:
-        label_out, desc_out = _split_label_desc(label, description)
+        # propose is a correction/PATCH — label and description are independent
+        # fields. Do NOT use _split_label_desc (which maps desc→label when label
+        # is absent) — that would make --desc set the label instead of description.
+        #
+        # reviewer/qa/participants build users[] the same way as create().
+        users: list[dict[str, Any]] = []
+        rev = _participant(reviewer, ROLE_REVIEWER)
+        if rev is not None:
+            users.append(rev)
+        qa_p = _participant(qa, ROLE_QA)
+        if qa_p is not None:
+            users.append(qa_p)
+        if participants:
+            users.extend(participants)
+        resolved_users = self._resolve_users(users, event_id=event_id)
+
         args = _clean({
             "event_id": int(event_id),
             "status_id": status_id,
-            "label": label_out,
-            "description": desc_out,
+            "label": label,
+            "description": description,
             "start": start,
             "end": end,
             "date": date,
@@ -538,6 +571,7 @@ class ContractClient:
             # reply_to, blocked_by, do_after) onto the event. Forwarded
             # verbatim — only attached when the caller supplies it.
             "settings": settings,
+            "users": resolved_users if resolved_users else None,
         })
         return self.call(_TOOL_MAP["propose"], args)
 
@@ -576,6 +610,132 @@ class ContractClient:
             "ids": [int(i) for i in ids],
             "vote": bool(vote),
         })
+
+    # ── creator/owner marker resolution ───────────────────────────
+
+    def _resolve_users(
+        self,
+        users: list[dict[str, Any]],
+        event_id: int | None = None,
+        contract_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Resolve 'creator'/'owner' markers to actual user IDs.
+
+        'creator' — fetched via task(event_id).user_id
+        'owner'   — fetched via contract owner lookup
+
+        When a marker cannot be resolved (missing context), an error is raised.
+        """
+        has_marker = any(u.get("type") in ("creator", "owner") for u in users)
+        if not has_marker:
+            return users
+
+        creator_id: int | None = None
+        owner_id: int | None = None
+
+        resolved: list[dict[str, Any]] = []
+        for u in users:
+            if u["type"] == "creator":
+                if creator_id is None:
+                    if event_id is None:
+                        raise ContractError(
+                            'Cannot resolve "creator" marker without an event_id'
+                            " (not available in create context)"
+                        )
+                    event = self.task(event_id)
+                    if not isinstance(event, dict):
+                        raise ContractError(
+                            f"Event {event_id} — unexpected response type"
+                        )
+                    creator_id = event.get("user_id")
+                    if not creator_id:
+                        raise ContractError(
+                            f"Event {event_id} has no user_id"
+                            ' — cannot resolve "creator" marker'
+                        )
+                    creator_id = int(creator_id)
+                resolved.append({
+                    "participable_id": creator_id,
+                    "type": "user",
+                    "role_id": u["role_id"],
+                })
+            elif u["type"] == "owner":
+                if owner_id is None:
+                    cid = contract_id or self._resolve_owner_contract_id(event_id)
+                    owner_id = self._resolve_owner(cid)
+                resolved.append({
+                    "participable_id": owner_id,
+                    "type": "user",
+                    "role_id": u["role_id"],
+                })
+            else:
+                resolved.append(u)
+        return resolved
+
+    def _resolve_owner(self, contract_id: int) -> int:
+        """Resolve 'owner' marker to a contract's owner user_id.
+        Fetches the contract list and filters by contract_id.
+        """
+        contracts = self.list_contracts()
+        if isinstance(contracts, dict):
+            contracts = contracts.get("contracts", contracts.get("items", []))
+        if not isinstance(contracts, list):
+            raise ContractError(
+                f"Cannot resolve owner: list_contracts returned unexpected type"
+            )
+        contract = next(
+            (c for c in contracts if int(c.get("id", 0)) == contract_id), None
+        )
+        if not contract:
+            raise ContractError(
+                f"Contract {contract_id} not found — cannot resolve 'owner' marker"
+            )
+
+        # Try flat owner_id
+        owner_id = contract.get("owner_id")
+        if owner_id:
+            return int(owner_id)
+
+        # Fallback: parse data.users for role_id:1 entry
+        data = contract.get("data", {})
+        if isinstance(data, dict):
+            users = data.get("users", {})
+            if isinstance(users, dict):
+                for entry in users.values():
+                    if isinstance(entry, dict) and entry.get("role_id") == 1:
+                        uid = entry.get("user_id") or entry.get("participable_id")
+                        if uid:
+                            return int(uid)
+            elif isinstance(users, list):
+                for entry in users:
+                    if isinstance(entry, dict) and entry.get("role_id") == 1:
+                        uid = entry.get("user_id") or entry.get("participable_id")
+                        if uid:
+                            return int(uid)
+
+        raise ContractError(
+            f"Contract {contract_id} has no owner_id"
+            " or data.users[role_id=1] — cannot resolve 'owner' marker"
+        )
+
+    def _resolve_owner_contract_id(self, event_id: int | None = None) -> int:
+        """Given an event_id, fetch the event to find its contract_id."""
+        if event_id is None:
+            raise ContractError(
+                'Cannot resolve "owner" marker without contract_id or event_id'
+            )
+        event = self.task(event_id)
+        if not isinstance(event, dict):
+            raise ContractError(
+                f"Event {event_id} — unexpected response type"
+            )
+        cid = event.get("contract_id")
+        if not cid:
+            raise ContractError(
+                f"Event {event_id} has no contract_id"
+                ' — cannot resolve "owner" marker'
+            )
+        return int(cid)
 
     # ── polling (REST, not MCP) ───────────────────────────────────
 

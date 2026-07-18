@@ -26,6 +26,108 @@ from ._state import (
 )
 
 
+def _load_config() -> None:
+    """Read ~/.ceki/config (KEY=VALUE, # comments) into os.environ.
+
+    Env wins — existing process.env vars are NOT overwritten.
+    Silent skip if file doesn't exist or can't be read.
+    """
+    config_path = os.path.join(os.path.expanduser("~"), ".ceki", "config")
+    try:
+        with open(config_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # Strip surrounding quotes
+                line = line.replace('"', "").replace("'", "")
+                if "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip()
+                if not key:
+                    continue
+                if key not in os.environ:
+                    os.environ[key] = val
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+
+
+def _resolve_task_reviewer(
+    client: Any, cid: int, raw: str
+) -> str:
+    """Resolve TASK_REVIEWER env value to a reviewer spec string.
+
+    Supports:
+      - agent:N / user:N → passed through as-is
+      - creator → resolved via get-profile (current agent)
+      - owner → resolved via list_contracts → data.users[role_id=1]
+    """
+    trimmed = raw.strip()
+    if not trimmed:
+        raise ValueError("TASK_REVIEWER is empty")
+    if trimmed.startswith("agent:") or trimmed.startswith("user:"):
+        return trimmed
+    if trimmed == "creator":
+        profile = client.raw("get-profile", {})
+        if isinstance(profile, dict):
+            pid = profile.get("id")
+            if pid:
+                return f"agent:{int(pid)}"
+        raise ValueError(
+            "TASK_REVIEWER=creator: failed to resolve current agent via get-profile"
+        )
+    if trimmed == "owner":
+        contracts = client.list_contracts()
+        if isinstance(contracts, dict):
+            contracts = contracts.get("contracts", contracts.get("items", []))
+        if not isinstance(contracts, list):
+            raise ValueError(
+                f"TASK_REVIEWER=owner: list_contracts returned unexpected type"
+            )
+        contract = next(
+            (c for c in contracts if int(c.get("id", 0)) == cid), None
+        )
+        if not contract:
+            raise ValueError(
+                f"TASK_REVIEWER=owner: contract {cid} not found in your contract list"
+            )
+        # Try flat owner_id
+        owner_id = contract.get("owner_id")
+        if owner_id:
+            return f"user:{int(owner_id)}"
+        # Try nested object
+        owner = contract.get("owner")
+        if isinstance(owner, dict):
+            oid = owner.get("id") or owner.get("user_id")
+            otype = owner.get("type") or owner.get("participable_type") or "user"
+            if oid:
+                return f"{otype}:{int(oid)}"
+        # Fallback: data.users[role_id=1]
+        data = contract.get("data", {})
+        if isinstance(data, dict):
+            users = data.get("users", {})
+            if isinstance(users, dict):
+                for entry in users.values():
+                    if isinstance(entry, dict) and entry.get("role_id") == 1:
+                        uid = entry.get("user_id") or entry.get("participable_id")
+                        ptype = entry.get("participable_type") or "user"
+                        if uid:
+                            return f"{ptype}:{int(uid)}"
+            elif isinstance(users, list):
+                for entry in users:
+                    if isinstance(entry, dict) and entry.get("role_id") == 1:
+                        uid = entry.get("user_id") or entry.get("participable_id")
+                        ptype = entry.get("participable_type") or "user"
+                        if uid:
+                            return f"{ptype}:{int(uid)}"
+        raise ValueError(
+            f"TASK_REVIEWER=owner: cannot resolve owner for contract {cid}"
+        )
+    return trimmed
+
+
 def _out(data: Any) -> None:
     json.dump(data, sys.stdout)
     sys.stdout.write("\n")
@@ -520,6 +622,9 @@ def _contract_dump(value: Any) -> None:
 def _cmd_contract(args: argparse.Namespace) -> int:
     from .contract import ContractError, contract_ids_from_env
 
+    # Load ~/.ceki/config (env wins) for TASK_*, CEKI_AGENT_MAP defaults.
+    _load_config()
+
     action = args.contract_action
     try:
         with _contract_client() as cli:
@@ -565,11 +670,38 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                 except ValueError as e:
                     _err(str(e), "args")
                     return 1
+
+                # CLI-args > env (TASK_*) > current default
+                qa = args.qa
+                if qa is None:
+                    env_qa = os.environ.get("TASK_QA", "").strip()
+                    if env_qa:
+                        qa = env_qa
+
+                reviewer = args.reviewer
+                if reviewer is None:
+                    env_reviewer = os.environ.get("TASK_REVIEWER", "").strip()
+                    if env_reviewer:
+                        try:
+                            reviewer = _resolve_task_reviewer(cli, cid, env_reviewer)
+                        except ValueError as e:
+                            _err(str(e), "config")
+                            return 1
+
+                status = args.status
+                if status is None:
+                    env_status = os.environ.get("TASK_DEFAULT_STATUS", "").strip()
+                    if env_status:
+                        try:
+                            status = int(env_status)
+                        except ValueError:
+                            pass
+
                 _contract_dump(cli.create(
                     cid,
                     label=args.label,
                     type_id=args.type,
-                    status_id=args.status,
+                    status_id=status,
                     kal_schedule_id=args.kal_schedule,
                     start=args.start,
                     end=args.end,
@@ -581,8 +713,8 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     description=args.desc,
                     data=data_obj,
                     benefitable=args.benefitable,
-                    reviewer=args.reviewer,
-                    qa=args.qa,
+                    reviewer=reviewer,
+                    qa=qa,
                     participants=extra_parts or None,
                     tags=tags,
                 ))
@@ -621,6 +753,14 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                 settings: dict[str, Any] | None = (
                     {"tags": tags} if tags else None
                 )
+                try:
+                    extra_parts = [
+                        _parse_participant(spec)
+                        for spec in (getattr(args, "participant", None) or [])
+                    ]
+                except ValueError as e:
+                    _err(str(e), "args")
+                    return 1
                 _contract_dump(cli.propose(
                     args.eid,
                     status_id=args.status,
@@ -634,6 +774,9 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     currency=args.currency,
                     benefitable=args.benefitable,
                     settings=settings,
+                    reviewer=args.reviewer,
+                    qa=args.qa,
+                    participants=extra_parts or None,
                 ))
             elif action == "progress":
                 _contract_dump(cli.progress(
@@ -998,6 +1141,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_cp.add_argument("--amount", type=int)
     p_cp.add_argument("--currency")
     p_cp.add_argument("--benefitable")
+    p_cp.add_argument("--reviewer", help="agent:8 or user:61 (role_id 5 shortcut)")
+    p_cp.add_argument("--qa", help="agent:8 or user:61 (role_id 6 shortcut)")
+    p_cp.add_argument(
+        "--participant",
+        action="append",
+        default=[],
+        dest="participant",
+        help=(
+            "Repeatable. agent:N:reviewer | user:N:qa | agent:N:role:NUMBER. "
+            "Stacks on top of --reviewer/--qa."
+        ),
+    )
     p_cp.add_argument(
         "--tags",
         help=(
