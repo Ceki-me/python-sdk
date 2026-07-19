@@ -177,6 +177,7 @@ class Client:
         human="natural",
         masking_mode: bool = True,
         fingerprint: bool | dict | None = True,
+        pacing_profile: str | None = None,
     ) -> Browser:
         if mode not in ("incognito", "main"):
             raise ValueError(f"mode must be 'incognito' or 'main', got {mode!r}")
@@ -185,6 +186,8 @@ class Client:
         msg: dict = {"type": "rent", "browser_id": schedule_id}
         if mode != "incognito":
             msg["mode"] = mode
+        if pacing_profile is not None:
+            msg["pacing_profile"] = pacing_profile
         await self._ws_send(msg)
         try:
             match = await asyncio.wait_for(fut, timeout=90)
