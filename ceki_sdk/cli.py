@@ -68,6 +68,41 @@ def _connect_options() -> ConnectOptions:
     return opts
 
 
+# ── Daemon lifecycle helpers ────────────────────────────────────────────────
+
+
+def _ensure_daemon() -> bool:
+    """Auto-start the daemon if not already running.
+
+    Returns ``True`` when the daemon is (or was already) running,
+    ``False`` if it could not be started.
+    """
+    if is_running():
+        return True
+    log_path = Path("/tmp/ceki-daemon.log")
+    log_file = log_path.open("a")
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "ceki_sdk.daemon"],
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        close_fds=True,
+        start_new_session=True,
+    )
+    for _ in range(20):
+        time.sleep(0.25)
+        if is_running():
+            return True
+    if is_running():
+        return True
+    # One last check — maybe it started just after the loop
+    proc.poll()
+    if proc.returncode is not None:
+        log_text = log_path.read_text() if log_path.exists() else "(no log)"
+        import logging
+        logging.getLogger(__name__).error("daemon failed to start:\n%s", log_text)
+    return False
+
+
 # ── Daemon IPC ──────────────────────────────────────────────────────────────
 
 
@@ -195,6 +230,11 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
 
 
 async def _cmd_rent(args: argparse.Namespace) -> None:
+    # Auto-start daemon on rent — subsequent commands use the persistent WS
+    if not _ensure_daemon():
+        # Daemon failed to start — fall through to one-shot fallback
+        pass
+
     # Try daemon IPC
     fp_from = str(Path(args.fingerprint_from).resolve()) if args.fingerprint_from else None
     try:
