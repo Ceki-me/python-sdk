@@ -1,5 +1,7 @@
 # ceki-sdk
 
+> **Using Playwright / Puppeteer / Selenium?** Ceki speaks the same CDP protocol — [see migration guide](#playwright--puppeteer--selenium-compatibility)
+
 Python SDK for [browser.ceki.me](https://browser.ceki.me) — rent real browsers from real people for AI agent automation.
 
 ## Install
@@ -27,6 +29,84 @@ asyncio.run(main())
 ```
 
 **BREAKING in 2.2.0:** `connect()` no longer accepts `relay_url=` or `reconnect=` kwargs — pass a `ConnectOptions` object instead.
+
+## Playwright / Puppeteer / Selenium Compatibility
+
+Ceki speaks raw **CDP (Chrome DevTools Protocol)** — the same protocol Playwright and Puppeteer use internally. Most automation scripts port with just an import and connection change.
+
+### Why Ceki instead of your current stack?
+
+| Feature | Playwright | Puppeteer | Selenium | **Ceki** |
+|---|---|---|---|---|
+| Real residential IPs | ❌ | ❌ | ❌ | ✅ |
+| Human behavioral mimicry | ❌ | ❌ | ❌ | ✅ |
+| Captcha solving via chat | ❌ | ❌ | ❌ | ✅ |
+| Raw CDP access | ✅ | ✅ | Partial | ✅ native |
+| MCP-native | ❌ | ❌ | ❌ | ✅ |
+| Real human browser provider | ❌ | ❌ | ❌ | ✅ |
+| Zero bot detection risk | ❌ | ❌ | ❌ | ✅ |
+
+### Per-framework migration
+
+- **Playwright** — `page.context.newCDPSession(page)` → `client.rent()`, then replace `cdp_session.send('DOM.getDocument')` with `browser.send({"method": "DOM.getDocument"})`. Navigation, clicking, typing, and DOM queries work identically.
+- **Puppeteer** — `page._client().send('DOM.getDocument')` → `browser.send({"method": "DOM.getDocument"})`. Same CDP method names and params.
+- **Selenium** — `driver.execute_cdp_cmd('DOM.getDocument', {})` → `browser.send({"method": "DOM.getDocument"})`. Same method names, same parameter shapes.
+- **undetected-chromedriver** — no longer needed. Ceki provides a real human browser fingerprint + residential IP. No WebDriver patches required.
+- **selenium-wire** — request interception: `browser.send({"method": "Network.enable"})` + subscribe to `Network.responseReceived` events.
+- **MCP** — Ceki is MCP-native. Connect it as an MCP server (`ceki mcp`), and any MCP client (Claude Code, Cline, Cursor) gets browser tools — navigate, click, type, screenshot, captcha chat — without writing a single line of CDP code.
+
+### Migration example: Playwright → Ceki (Python)
+
+<table>
+<tr><th>Playwright (raw CDP)</th><th>Ceki</th></tr>
+<tr><td>
+
+```python
+from playwright.async_api import async_playwright
+
+async with async_playwright() as p:
+    browser = await p.chromium.launch()
+    page = await browser.new_page()
+    cdp = await page.context.new_cdp_session(page)
+    await cdp.send("Page.navigate",
+        {"url": "https://x.com"})
+    await page.click("text=Log in")
+    data = await cdp.send(
+        "Page.captureScreenshot")
+    await browser.close()
+```
+
+</td><td>
+
+```python
+from ceki_sdk import connect
+
+async def main():
+    client = await connect(API_KEY)
+    br = await client.rent(sid)
+    await br.send({
+        "method": "Page.navigate",
+        "params": {"url": "https://x.com"},
+    })
+    await br.click(320, 480)
+    snap = await br.screenshot()
+    await br.close()
+    await client.close()
+```
+
+</td></tr>
+</table>
+
+The `browser.send({"method": ..., "params": ...})` method mirrors Playwright's `CDPSession.send()` — same CDP method names, same parameter shapes. Only the connection setup changes.
+
+### Known Differences
+
+Ceki's CDP-over-WSS relay is not a direct local CDP pipe — a few differences to keep in mind when migrating from Playwright / Puppeteer / Selenium:
+
+- **No CSS selectors on interaction methods** — `click`, `type`, and `scroll` take viewport coordinates, not CSS selectors. For element-based selection, use `Runtime.evaluate` to get bounding rects, then pass coordinates.
+- **Speed** — each command travels over the WebSocket relay with ~50–200ms round-trip (internet-latency dependent, unlike local CDP which is sub-millisecond). Batch operations in a single `Runtime.evaluate` where possible, rather than chaining many small CDP calls.
+- **120s grace window** — after each command there's a 120s window before the session auto-closes. This is by design for workflow chaining, but long-running idle sessions will need a keepalive.
+- **Runtime.evaluate serialization** — CDP's `Runtime.evaluate` returns JSON-serializable values only. Functions, symbols, DOM nodes, and circular references are not transferable. Use `--returnByValue` explicitly.
 
 ## Environment Variables
 
