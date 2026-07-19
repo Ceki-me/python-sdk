@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import json
 import os
+import signal
+import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 from . import ConnectOptions, connect
 from ._exceptions import (
@@ -24,6 +30,7 @@ from ._state import (
     save_session,
     update_last_seen_ts,
 )
+from .daemon import DAEMON_HOST, PID_FILE, daemon_port, is_running
 
 
 def _out(data: Any) -> None:
@@ -61,7 +68,156 @@ def _connect_options() -> ConnectOptions:
     return opts
 
 
+# ── Daemon IPC ──────────────────────────────────────────────────────────────
+
+
+async def _daemon_request(
+    path: str,
+    params: dict[str, Any] | None = None,
+    timeout: float = 120.0,
+) -> Any:
+    """Send an IPC request to a running daemon.
+
+    Returns ``None`` when the daemon is not running (clean fallback for the
+    caller).  Raises ``CekiError`` when the daemon *was* expected to be
+    reachable but isn't — the caller shows the error to the user instead of
+    falling back to one-shot mode.
+
+    The function checks ``PID_FILE`` first as a fast-path; if absent there is
+    no running daemon.  If present but unreachable we clean the stale file.
+    """
+    if not PID_FILE.exists():
+        return None  # daemon not running → clean fallback
+
+    port = daemon_port()
+    url = f"http://{DAEMON_HOST}:{port}{path}"
+    try:
+        async with httpx.AsyncClient() as http:
+            resp = await http.post(
+                url,
+                content=json.dumps(params or {}).encode(),
+                headers={"Content-Type": "application/json"},
+                timeout=timeout,
+            )
+            body = resp.json()
+            if not body.get("ok"):
+                raise CekiError(body.get("error", "daemon error"))
+            return body.get("result")
+    except httpx.ConnectError:
+        PID_FILE.unlink(missing_ok=True)
+        return None  # stale PID → clean fallback
+    except httpx.TimeoutException:
+        raise CekiError("daemon not responding (timeout), start daemon first")
+    except httpx.HTTPError as e:
+        raise CekiError(f"daemon error: {e}")
+
+
+# ── Daemon subcommands ───────────────────────────────────────────────────────
+
+
+def _cmd_daemon_start() -> int:
+    """Start the daemon as a detached subprocess."""
+    if is_running():
+        print("daemon already running (pid {})".format(PID_FILE.read_text().strip()))
+        return 0
+
+    log_path = Path("/tmp/ceki-daemon.log")
+    log_file = log_path.open("a")
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "ceki_sdk.daemon"],
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        close_fds=True,
+        start_new_session=True,
+    )
+    # Give it a moment to start
+    for _ in range(20):
+        time.sleep(0.25)
+        if is_running():
+            print(f"daemon started (pid {proc.pid})")
+            return 0
+    # Process may still be alive — check one last time
+    if is_running():
+        print(f"daemon started (pid {proc.pid})")
+        return 0
+    print("daemon failed to start (check /tmp/ceki-daemon.log)", file=sys.stderr)
+    return 1
+
+
+def _cmd_daemon_stop() -> int:
+    """Stop the daemon by sending SIGTERM."""
+    if not PID_FILE.exists():
+        print("daemon is not running", file=sys.stderr)
+        return 0
+    try:
+        pid = int(PID_FILE.read_text().strip())
+        os.kill(pid, signal.SIGTERM)
+        for _ in range(20):
+            time.sleep(0.25)
+            if not is_running():
+                print("daemon stopped")
+                return 0
+        # Force kill after 5s
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        PID_FILE.unlink(missing_ok=True)
+        print("daemon killed (SIGKILL)")
+    except (ValueError, OSError) as e:
+        PID_FILE.unlink(missing_ok=True)
+        print(f"daemon stop: {e}", file=sys.stderr)
+    return 0
+
+
+def _cmd_daemon_status() -> int:
+    """Show daemon status."""
+    if is_running():
+        pid = PID_FILE.read_text().strip()
+        port = daemon_port()
+        print(f"daemon running (pid {pid}, {DAEMON_HOST}:{port})")
+    else:
+        print("daemon is not running")
+    return 0
+
+
+def _cmd_daemon(args: argparse.Namespace) -> int:
+    action = args.daemon_action
+    if action == "start":
+        return _cmd_daemon_start()
+    if action == "stop":
+        return _cmd_daemon_stop()
+    if action == "status":
+        return _cmd_daemon_status()
+    print(f"unknown daemon action: {action}", file=sys.stderr)
+    return 1
+
+
 async def _cmd_rent(args: argparse.Namespace) -> None:
+    # Try daemon IPC
+    fp_from = str(Path(args.fingerprint_from).resolve()) if args.fingerprint_from else None
+    try:
+        result = await _daemon_request("/rent", {
+            "schedule": args.schedule,
+            "mode": args.mode,
+            "fingerprint_from": fp_from,
+        })
+        if result is not None:
+            sid = result["session_id"]
+            save_session(sid, {
+                "session_id": sid,
+                "chat_topic_id": result.get("chat_topic_id"),
+                "schedule_id": result.get("schedule_id"),
+                "last_seen_ts": None,
+            })
+            _out(result)
+            return
+    except CekiError as e:
+        _err(str(e), "daemon")
+        sys.exit(6)
+
+    # Fallback to one-shot
     api_key = _get_api_key()
     fp_data: bool | dict = True
     if args.fingerprint_from:
@@ -94,13 +250,29 @@ async def _resume_browser(api_key: str, session_id: str):
 
 
 async def _cmd_snapshot(args: argparse.Namespace) -> None:
+    # Try daemon IPC
+    try:
+        result = await _daemon_request("/snapshot", {"session_id": args.session_id})
+        if result is not None:
+            png_bytes = base64.b64decode(result["screenshot"]) if result.get("screenshot") else b""
+            out_path = args.output
+            with open(out_path, "wb") as f:
+                f.write(png_bytes)
+            if result.get("ts"):
+                update_last_seen_ts(args.session_id, result["ts"])
+            _out({"screenshot": out_path, "chat": result.get("chat", []), "ts": result.get("ts")})
+            return
+    except CekiError as e:
+        _err(str(e), "daemon")
+        sys.exit(6)
+
+    # Fallback to one-shot
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
         last_seen = get_last_seen_ts(args.session_id)
         browser._last_seen_ts = last_seen
         snap = await browser.snapshot()
-        import base64
         png_bytes = base64.b64decode(snap.screenshot) if snap.screenshot else b""
         out_path = args.output
         with open(out_path, "wb") as f:
@@ -123,6 +295,21 @@ def _human_flag(args: argparse.Namespace) -> bool | None:
 
 
 async def _cmd_navigate(args: argparse.Namespace) -> None:
+    # Try daemon IPC
+    try:
+        result = await _daemon_request("/navigate", {
+            "session_id": args.session_id,
+            "url": args.url,
+            "human": _human_flag(args),
+        })
+        if result is not None:
+            _out({"ok": True})
+            return
+    except CekiError as e:
+        _err(str(e), "daemon")
+        sys.exit(6)
+
+    # Fallback to one-shot
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
@@ -134,6 +321,22 @@ async def _cmd_navigate(args: argparse.Namespace) -> None:
 
 
 async def _cmd_click(args: argparse.Namespace) -> None:
+    # Try daemon IPC
+    try:
+        result = await _daemon_request("/click", {
+            "session_id": args.session_id,
+            "x": args.x,
+            "y": args.y,
+            "human": _human_flag(args),
+        })
+        if result is not None:
+            _out({"ok": True, "pointer": [args.x, args.y]})
+            return
+    except CekiError as e:
+        _err(str(e), "daemon")
+        sys.exit(6)
+
+    # Fallback to one-shot
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
@@ -149,6 +352,22 @@ async def _cmd_type(args: argparse.Namespace) -> None:
     # task 428 opt-in). --no-human / --raw → explicit flat for THIS call
     # only (the real BUG-B fix: stop the leak, but keep default-ON).
     # --natural is a no-op alias kept for backwards compatibility.
+    # Try daemon IPC
+    try:
+        result = await _daemon_request("/type", {
+            "session_id": args.session_id,
+            "text": args.text,
+            "selector": args.selector,
+            "human": _human_flag(args),
+        })
+        if result is not None:
+            _out({"ok": True})
+            return
+    except CekiError as e:
+        _err(str(e), "daemon")
+        sys.exit(6)
+
+    # Fallback to one-shot
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
@@ -160,6 +379,23 @@ async def _cmd_type(args: argparse.Namespace) -> None:
 
 
 async def _cmd_scroll(args: argparse.Namespace) -> None:
+    # Try daemon IPC
+    try:
+        result = await _daemon_request("/scroll", {
+            "session_id": args.session_id,
+            "x": args.x,
+            "y": args.y,
+            "dy": args.dy,
+            "human": _human_flag(args),
+        })
+        if result is not None:
+            _out({"ok": True})
+            return
+    except CekiError as e:
+        _err(str(e), "daemon")
+        sys.exit(6)
+
+    # Fallback to one-shot
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
@@ -171,6 +407,50 @@ async def _cmd_scroll(args: argparse.Namespace) -> None:
 
 
 async def _cmd_chat(args: argparse.Namespace) -> None:
+    # Try daemon IPC
+    try:
+        if args.chat_action == "send":
+            result = await _daemon_request("/chat/send", {
+                "session_id": args.session_id,
+                "text": args.text,
+            })
+            if result is not None:
+                _out({"ok": True, "message_id": result.get("message_id")})
+                return
+        elif args.chat_action == "next":
+            last_seen = get_last_seen_ts(args.session_id)
+            result = await _daemon_request("/chat/next", {
+                "session_id": args.session_id,
+                "timeout": args.timeout,
+                "since": last_seen,
+            })
+            if result is not None:
+                if result:  # has message
+                    update_last_seen_ts(args.session_id, result["ts"])
+                _out(result)  # None → no message
+                return
+        elif args.chat_action == "history":
+            since = None
+            if args.since:
+                try:
+                    ts_val = float(args.since)
+                    from datetime import datetime, timezone
+                    since = datetime.fromtimestamp(ts_val, tz=timezone.utc).isoformat()
+                except ValueError:
+                    since = args.since
+            result = await _daemon_request("/chat/history", {
+                "session_id": args.session_id,
+                "since": since,
+                "limit": args.limit,
+            })
+            if result is not None:
+                _out(result)
+                return
+    except CekiError as e:
+        _err(str(e), "daemon")
+        sys.exit(6)
+
+    # Fallback to one-shot (all chat actions, including send-image)
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
@@ -222,6 +502,18 @@ async def _cmd_chat(args: argparse.Namespace) -> None:
 
 
 async def _cmd_stop(args: argparse.Namespace) -> None:
+    # Try daemon IPC
+    try:
+        result = await _daemon_request("/stop", {"session_id": args.session_id})
+        if result is not None:
+            delete_session(args.session_id)
+            _out({"ok": True})
+            return
+    except CekiError as e:
+        _err(str(e), "daemon")
+        sys.exit(6)
+
+    # Fallback to one-shot
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
@@ -234,6 +526,35 @@ async def _cmd_stop(args: argparse.Namespace) -> None:
 
 
 async def _cmd_profile(args: argparse.Namespace) -> None:
+    # Try daemon IPC
+    try:
+        if args.profile_action == "export":
+            domains = ",".join(args.domains) if args.domains else None
+            result = await _daemon_request("/profile/export", {
+                "session_id": args.session_id,
+                "domains": domains,
+                "no_session_storage": args.no_session_storage,
+            })
+            if result is not None:
+                with open(args.output, "w") as f:
+                    json.dump(result, f)
+                _out({"ok": True, "path": args.output})
+                return
+        elif args.profile_action == "import":
+            with open(args.input, "r") as f:
+                profile_dict = json.load(f)
+            result = await _daemon_request("/profile/import", {
+                "session_id": args.session_id,
+                "profile": profile_dict,
+            })
+            if result is not None:
+                _out({"ok": True})
+                return
+    except CekiError as e:
+        _err(str(e), "daemon")
+        sys.exit(6)
+
+    # Fallback to one-shot
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
@@ -329,12 +650,29 @@ async def _cmd_wait(args: argparse.Namespace) -> None:
 
 
 async def _cmd_screenshot(args: argparse.Namespace) -> None:
+    # Try daemon IPC
+    try:
+        result = await _daemon_request("/screenshot", {
+            "session_id": args.session_id,
+            "full": args.full,
+        })
+        if result is not None:
+            data = base64.b64decode(result.get("data", ""))
+            with open(args.output, "wb") as f:
+                f.write(data)
+            _out({"ok": True, "path": args.output})
+            return
+    except CekiError as e:
+        _err(str(e), "daemon")
+        sys.exit(6)
+
+    # Fallback to one-shot
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
-        data = await browser.screenshot(format="png", full_page=args.full)
+        raw = await browser.screenshot(format="png", full_page=args.full)
         with open(args.output, "wb") as f:
-            f.write(data)
+            f.write(raw)
         _out({"ok": True, "path": args.output})
     finally:
         if client._ws:
@@ -342,6 +680,17 @@ async def _cmd_screenshot(args: argparse.Namespace) -> None:
 
 
 async def _cmd_switch_tab(args: argparse.Namespace) -> None:
+    # Try daemon IPC
+    try:
+        result = await _daemon_request("/switch-tab", {"session_id": args.session_id})
+        if result is not None:
+            _out({"ok": True})
+            return
+    except CekiError as e:
+        _err(str(e), "daemon")
+        sys.exit(6)
+
+    # Fallback to one-shot
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
@@ -353,6 +702,22 @@ async def _cmd_switch_tab(args: argparse.Namespace) -> None:
 
 
 async def _cmd_configure(args: argparse.Namespace) -> None:
+    # Try daemon IPC
+    try:
+        params: dict[str, Any] = {"session_id": args.session_id}
+        if args.masking_mode is not None:
+            params["masking_mode"] = args.masking_mode
+        if args.fingerprint is not None:
+            params["fingerprint"] = args.fingerprint
+        result = await _daemon_request("/configure", params)
+        if result is not None:
+            _out({"ok": True})
+            return
+    except CekiError as e:
+        _err(str(e), "daemon")
+        sys.exit(6)
+
+    # Fallback to one-shot
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
@@ -678,7 +1043,6 @@ def _cmd_contract(args: argparse.Namespace) -> int:
 
 
 def _cmd_hire(args: argparse.Namespace) -> int:
-    from .contract import ContractClient
 
     action = args.hire_action
     try:
@@ -714,10 +1078,25 @@ def _cmd_timelog(args: argparse.Namespace) -> int:
 
 
 async def _cmd_cdp(args: argparse.Namespace) -> None:
+    # Try daemon IPC
+    params = json.loads(args.params) if args.params else {}
+    try:
+        result = await _daemon_request("/cdp", {
+            "session_id": args.session_id,
+            "method": args.method,
+            "params": params,
+        })
+        if result is not None:
+            _out(result)
+            return
+    except CekiError as e:
+        _err(str(e), "daemon")
+        sys.exit(6)
+
+    # Fallback to one-shot
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
-        params = json.loads(args.params) if args.params else {}
         result = await browser.send({"method": args.method, "params": params})
         _out(result)
     finally:
@@ -1067,6 +1446,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_tlc.add_argument("event_id", type=int, help="Event ID")
 
+    # ── daemon subcommand ─────────────────────────────────────────────
+    p_daemon = sub.add_parser("daemon", help="Manage persistent renter daemon")
+    dsub = p_daemon.add_subparsers(dest="daemon_action", required=True)
+    dsub.add_parser("start", help="Start daemon (detached subprocess)")
+    dsub.add_parser("stop", help="Stop daemon (SIGTERM)")
+    dsub.add_parser("status", help="Check daemon status")
+
     return parser
 
 
@@ -1104,6 +1490,9 @@ def main() -> None:
 
     if args.command == "timelog":
         sys.exit(_cmd_timelog(args))
+
+    if args.command == "daemon":
+        sys.exit(_cmd_daemon(args))
 
     handler = handlers.get(args.command)
     if not handler:
