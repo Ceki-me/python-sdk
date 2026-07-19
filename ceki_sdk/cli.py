@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import base64
 import json
+import logging
 import os
 import signal
 import subprocess
@@ -88,18 +89,18 @@ def _ensure_daemon() -> bool:
         close_fds=True,
         start_new_session=True,
     )
+    log_file.close()
     for _ in range(20):
         time.sleep(0.25)
         if is_running():
             return True
-    if is_running():
-        return True
-    # One last check — maybe it started just after the loop
     proc.poll()
     if proc.returncode is not None:
         log_text = log_path.read_text() if log_path.exists() else "(no log)"
-        import logging
+        print(f"daemon failed to start:\n{log_text}", file=sys.stderr)
         logging.getLogger(__name__).error("daemon failed to start:\n%s", log_text)
+    else:
+        print("daemon started but not responding yet (check /tmp/ceki-daemon.log)", file=sys.stderr)
     return False
 
 
@@ -166,6 +167,7 @@ def _cmd_daemon_start() -> int:
         close_fds=True,
         start_new_session=True,
     )
+    log_file.close()
     # Give it a moment to start
     for _ in range(20):
         time.sleep(0.25)
