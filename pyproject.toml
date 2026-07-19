@@ -36,6 +36,7 @@ Repository = "https://github.com/Ceki-me/python-sdk"
 
 [project.scripts]
 ceki = "ceki_sdk.cli:main"
+ceki-daemon = "ceki_sdk.daemon:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["ceki_sdk"]
