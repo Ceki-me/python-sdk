@@ -30,6 +30,8 @@ asyncio.run(main())
 
 **BREAKING in 2.2.0:** `connect()` no longer accepts `relay_url=` or `reconnect=` kwargs — pass a `ConnectOptions` object instead.
 
+> **Using Playwright / Puppeteer / Selenium?** Ceki speaks the same CDP protocol — [see migration guide](#playwright--puppeteer--selenium-compatibility)
+
 ## Playwright / Puppeteer / Selenium Compatibility
 
 Ceki speaks raw **CDP (Chrome DevTools Protocol)** — the same protocol Playwright and Puppeteer use internally. Most automation scripts port with just an import and connection change.
@@ -49,7 +51,7 @@ Ceki speaks raw **CDP (Chrome DevTools Protocol)** — the same protocol Playwri
 ### Per-framework migration
 
 - **Playwright** — `page.context.newCDPSession(page)` → `client.rent()`, then replace `cdp_session.send('DOM.getDocument')` with `browser.send({"method": "DOM.getDocument"})`. Navigation, clicking, typing, and DOM queries work identically.
-- **Puppeteer** — `page._client().send('DOM.getDocument')` → `browser.send({"method": "DOM.getDocument"})`. Same CDP method names and params.
+- **Puppeteer / Pyppeteer** — `page._client().send('DOM.getDocument')` → `browser.send({"method": "DOM.getDocument"})`. Same CDP method names and params.
 - **Selenium** — `driver.execute_cdp_cmd('DOM.getDocument', {})` → `browser.send({"method": "DOM.getDocument"})`. Same method names, same parameter shapes.
 - **undetected-chromedriver** — no longer needed. Ceki provides a real human browser fingerprint + residential IP. No WebDriver patches required.
 - **selenium-wire** — request interception: `browser.send({"method": "Network.enable"})` + subscribe to `Network.responseReceived` events.
