@@ -1042,6 +1042,25 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     benefitable=args.benefitable,
                     settings=settings,
                 ))
+            elif action == "edit":
+                tags = _parse_tags(args.tags) if getattr(args, "tags", None) else None
+                settings: dict[str, Any] | None = (
+                    {"tags": tags} if tags else None
+                )
+                _contract_dump(cli.propose(
+                    args.eid,
+                    status_id=args.status,
+                    label=args.label,
+                    description=args.desc,
+                    start=args.start,
+                    end=args.end,
+                    date=args.date,
+                    duration=args.duration,
+                    amount=args.amount,
+                    currency=args.currency,
+                    benefitable=args.benefitable,
+                    settings=settings,
+                ))
             elif action == "progress":
                 _contract_dump(cli.progress(
                     args.eid,
@@ -1115,40 +1134,6 @@ def _cmd_timelog(args: argparse.Namespace) -> int:
                 return 1
     except ContractError as e:
         _err(str(e), "timelog")
-        return 1
-    return 0
-
-
-def _cmd_edit(args: argparse.Namespace) -> int:
-    """Semantic sugar: ``ceki edit`` ≡ ``ceki contract propose``.
-
-    Same wire call, same args, different name — lets AI agents express
-    "edit the task" intent instead of "propose a correction".
-    """
-    from .contract import ContractError
-
-    try:
-        with _contract_client() as cli:
-            tags = _parse_tags(args.tags) if getattr(args, "tags", None) else None
-            settings: dict[str, Any] | None = (
-                {"tags": tags} if tags else None
-            )
-            _contract_dump(cli.propose(
-                args.eid,
-                status_id=args.status,
-                label=args.label,
-                description=args.desc,
-                start=args.start,
-                end=args.end,
-                date=args.date,
-                duration=args.duration,
-                amount=args.amount,
-                currency=args.currency,
-                benefitable=args.benefitable,
-                settings=settings,
-            ))
-    except ContractError as e:
-        _err(str(e), "contract")
         return 1
     return 0
 
@@ -1462,6 +1447,27 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    p_edit = csub.add_parser("edit", help="Edit task (semantic sugar for propose)")
+    p_edit.add_argument("eid", type=int)
+    p_edit.add_argument("--status", type=int)
+    p_edit.add_argument("--label")
+    p_edit.add_argument("--desc")
+    p_edit.add_argument("--start")
+    p_edit.add_argument("--end")
+    p_edit.add_argument("--date")
+    p_edit.add_argument("--duration", type=int)
+    p_edit.add_argument("--amount", type=int)
+    p_edit.add_argument("--currency")
+    p_edit.add_argument("--benefitable")
+    p_edit.add_argument(
+        "--tags",
+        help=(
+            "Project tags (sugar for settings.tags[]). Comma-separated, each "
+            "item key[:label[:color]]. E.g. 'backend,urgent' or "
+            "'backend:Backend:#ff0000'."
+        ),
+    )
+
     p_cpr = csub.add_parser(
         "progress",
         help="Status correction + progress comment (description is not touched)",
@@ -1522,28 +1528,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_tlc.add_argument("event_id", type=int, help="Event ID")
 
-    # ── edit subcommand (semantic sugar over contract propose) ────────
-    p_edit = sub.add_parser("edit", help="Propose a correction (semantic sugar for ``contract propose``)")
-    p_edit.add_argument("eid", type=int, help="Event ID")
-    p_edit.add_argument("--status", type=int)
-    p_edit.add_argument("--label")
-    p_edit.add_argument("--desc")
-    p_edit.add_argument("--start")
-    p_edit.add_argument("--end")
-    p_edit.add_argument("--date")
-    p_edit.add_argument("--duration", type=int)
-    p_edit.add_argument("--amount", type=int)
-    p_edit.add_argument("--currency")
-    p_edit.add_argument("--benefitable")
-    p_edit.add_argument(
-        "--tags",
-        help=(
-            "Project tags (sugar for settings.tags[]). Comma-separated, each "
-            "item key[:label[:color]]. E.g. 'backend,urgent' or "
-            "'backend:Backend:#ff0000'."
-        ),
-    )
-
     # ── daemon subcommand ─────────────────────────────────────────────
     p_daemon = sub.add_parser("daemon", help="Manage persistent renter daemon")
     dsub = p_daemon.add_subparsers(dest="daemon_action", required=True)
@@ -1579,9 +1563,6 @@ def main() -> None:
         "upload": _cmd_upload,
         "request-captcha": _cmd_request_captcha,
     }
-
-    if args.command == "edit":
-        sys.exit(_cmd_edit(args))
 
     if args.command == "contract":
         sys.exit(_cmd_contract(args))
