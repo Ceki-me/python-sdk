@@ -431,7 +431,16 @@ class Client:
             session_id = msg.get("session_id", "")
             browser = self._active_browsers.get(session_id)
             if browser:
-                await browser._on_cdp_response(msg)
+                # When P2P is active and ceki-cmd DC is open, CDP responses
+                # arrive via BOTH WS relay (cdp_response) and the data channel.
+                # The WS response arrives first but has empty result for large
+                # payloads like screenshot base64. Skip WS responses when DC is
+                # open to avoid a race where the empty WS result resolves the
+                # pending future before the DC response with real data arrives.
+                if self._p2p is not None and self._p2p.cmd_dc_open:
+                    log.debug("cdp: skip WS cdp_response (P2P DC active, id=%s)", msg.get("id"))
+                else:
+                    await browser._on_cdp_response(msg)
             return
         if mtype == "cdp_event":
             session_id = msg.get("session_id", "")
