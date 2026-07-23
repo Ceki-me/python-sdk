@@ -25,6 +25,7 @@ dependencies = [
     "websockets>=12,<14",
     "httpx>=0.27",
     "pydantic>=2",
+    "aiortc>=1.9,<2",
 ]
 
 [project.optional-dependencies]

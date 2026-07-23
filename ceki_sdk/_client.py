@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +25,7 @@ from ._exceptions import (
     SessionNotFound,
 )
 from ._models import BrowserOption, Match
+from ._webrtc import WebRTCTransport
 
 if TYPE_CHECKING:
     from ._models import SessionInfo
@@ -63,6 +65,15 @@ class Client:
         self._last_pong = 0.0
         self._closed = False
         self._stashed_first_frame: str | None = None
+
+        # P2P WebRTC transport (primary, WS = fallback)
+        self._p2p: WebRTCTransport | None = None
+        self._p2p_init_lock = asyncio.Lock()
+        self._p2p_enabled: bool = (
+            os.environ.get("CEKI_FORCE_WS", "").lower() not in ("1", "true", "yes")
+        )
+        # ICE servers discovered from webrtc.answer (set by relay)
+        self._p2p_ice_servers: list[dict[str, Any]] | None = None
 
     def _ws_extra_headers(self) -> dict[str, str]:
         if not self._basic_auth:
@@ -223,6 +234,10 @@ class Client:
 
     async def close(self) -> None:
         self._closed = True
+        # Close P2P transport first, then browsers
+        if self._p2p is not None:
+            await self._p2p.close()
+            self._p2p = None
         for browser in list(self._active_browsers.values()):
             await browser.close()
         if self._heartbeat_task and not self._heartbeat_task.done():
@@ -236,6 +251,10 @@ class Client:
     async def disconnect(self) -> None:
         """Close the WS without ending active sessions (for resume-pattern)."""
         self._closed = True
+        # Close P2P transport (disconnect WS but keep session)
+        if self._p2p is not None:
+            await self._p2p.close()
+            self._p2p = None
         self._active_browsers.clear()
         if self._heartbeat_task and not self._heartbeat_task.done():
             self._heartbeat_task.cancel()
@@ -356,6 +375,37 @@ class Client:
             fut = self._pending_rents.pop(server_event_id, None)
             if fut and not fut.done():
                 fut.set_result(Match.model_validate(msg))
+
+            # Initiate P2P WebRTC after successful match
+            session_id = msg.get("session_id", "")
+            if self._p2p_enabled and session_id:
+                asyncio.create_task(
+                    self._init_p2p(session_id),
+                    name=f"p2p_init_{session_id[:8]}",
+                )
+            return
+        if mtype == "webrtc.answer":
+            session_id = msg.get("session_id", "")
+            ice_servers = msg.get("ice_servers")
+            if ice_servers:
+                self._p2p_ice_servers = ice_servers
+                # Push to transport for potential future use (re-init)
+                if self._p2p is not None:
+                    self._p2p.set_ice_servers(ice_servers)
+            if self._p2p is not None:
+                sdp = msg.get("sdp", "")
+                if sdp:
+                    asyncio.create_task(
+                        self._p2p.set_remote_description(sdp, type="answer"),
+                        name=f"p2p_answer_{session_id[:8]}",
+                    )
+            return
+        if mtype == "webrtc.ice_candidate":
+            if self._p2p is not None:
+                asyncio.create_task(
+                    self._p2p.add_ice_candidate(msg),
+                    name="p2p_ice_candidate",
+                )
             return
         if mtype == "resume_ok":
             sid = msg.get("session_id", "")
@@ -518,3 +568,86 @@ class Client:
 
         log.error("max reconnect attempts reached")
         self._fail_pending(ConnectionLost("max reconnect attempts reached"))
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # P2P WebRTC transport
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def _init_p2p(self, session_id: str) -> None:
+        """Initialize P2P WebRTC transport after a successful match.
+
+        Creates a ``WebRTCTransport``, wires ICE candidate callback to send
+        via WS signaling, creates an offer, and sends ``webrtc.offer``.
+
+        Mirrors the front flow in ``useWebRTCP2P.js createAndSendOffer``.
+        """
+        async with self._p2p_init_lock:
+            if self._p2p is not None:
+                return  # already initialized
+
+            # Merge discovered ICE servers with constructor defaults/environment
+            ice_servers = self._p2p_ice_servers or [
+                {"urls": "stun:stun.l.google.com:19302"}
+            ]
+
+            transport = WebRTCTransport(
+                ice_servers=ice_servers,
+                ice_transport_policy=os.environ.get("CEKI_ICE_TRANSPORT_POLICY"),
+            )
+
+            # Wire ICE candidate callback → WS signaling
+            async def _on_ice(candidate: dict[str, Any]) -> None:
+                payload = {
+                    "type": "webrtc.ice_candidate",
+                    "session_id": session_id,
+                    "candidate": candidate.get("candidate", ""),
+                    "sdp_mid": candidate.get("sdp_mid"),
+                    "sdp_mline_index": candidate.get("sdp_mline_index", 0),
+                    "fingerprint": transport.extract_fingerprint() or "",
+                }
+                try:
+                    await self._ws_send(payload)
+                except Exception as exc:
+                    log.warning("p2p: failed to send ICE candidate: %s", exc)
+
+            transport.on_ice_candidate = _on_ice
+
+            # Wire CDP message callback → route to active browser
+            async def _on_cdp(msg: dict[str, Any]) -> None:
+                cmd_id = msg.get("id")
+                method = msg.get("method", "")
+                session_id_dc = msg.get("session_id", session_id)
+                browser = self._active_browsers.get(session_id_dc)
+                if browser:
+                    if cmd_id is not None:
+                        await browser._on_cdp_response(msg)
+                    elif method:
+                        await browser._on_cdp_event(msg)
+
+            transport.on_cdp_message = _on_cdp
+
+            self._p2p = transport
+
+        try:
+            offer_sdp = await transport.create_offer()
+            fingerprint = transport.extract_fingerprint() or ""
+
+            log.info(
+                "p2p: sending webrtc.offer session_id=%s sdp_len=%d fingerprint=%s",
+                session_id[:8],
+                len(offer_sdp),
+                fingerprint[:16] if fingerprint else "none",
+            )
+
+            await self._ws_send({
+                "type": "webrtc.offer",
+                "session_id": session_id,
+                "sdp": offer_sdp,
+                "fingerprint": fingerprint,
+            })
+        except Exception as exc:
+            log.error("p2p: failed to create/send offer: %s", exc)
+            # Fallback: P2P failed, WS path continues to work
+            if self._p2p is not None:
+                await self._p2p.close()
+                self._p2p = None

@@ -134,15 +134,26 @@ class Browser:
         fut: asyncio.Future[Any] = loop.create_future()
         self._pending_cdp[cdp_id] = fut
         try:
-            await self._client._ws_send(
-                {
-                    "type": "cdp",
+            p2p = self._client._p2p
+            if p2p is not None and p2p.cmd_dc_open:
+                # P2P path: send CDP over ceki-cmd data channel
+                await p2p.send_cdp({
                     "session_id": self.session_id,
                     "id": cdp_id,
                     "method": cdp["method"],
                     "params": cdp.get("params", {}),
-                }
-            )
+                })
+            else:
+                # WS path (fallback — used before P2P connects or when forced off)
+                await self._client._ws_send(
+                    {
+                        "type": "cdp",
+                        "session_id": self.session_id,
+                        "id": cdp_id,
+                        "method": cdp["method"],
+                        "params": cdp.get("params", {}),
+                    }
+                )
             result = await asyncio.wait_for(asyncio.shield(fut), timeout=timeout)
             return result
         finally:
