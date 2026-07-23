@@ -132,10 +132,17 @@ class Browser:
         self._cdp_counter += 1
         loop = asyncio.get_event_loop()
         fut: asyncio.Future[Any] = loop.create_future()
+        p2p = self._client._p2p
+        using_dc = p2p is not None and p2p.cmd_dc_open
+        # Tag the future so _on_cdp_response knows which transport
+        # the response is expected on. When sent via DC, the WS relay
+        # echoes a cdp_response that arrives first but has empty result
+        # for large payloads (screenshot). Skip the WS echo and wait
+        # for the DC response with full data.
+        fut._cdp_transport = 'dc' if using_dc else 'ws'  # type: ignore[attr-defined]
         self._pending_cdp[cdp_id] = fut
         try:
-            p2p = self._client._p2p
-            if p2p is not None and p2p.cmd_dc_open:
+            if using_dc:
                 # P2P path: send CDP over ceki-cmd data channel
                 await p2p.send_cdp({
                     "session_id": self.session_id,
@@ -834,8 +841,18 @@ class Browser:
     async def _on_cdp_response(self, msg: dict[str, Any]) -> None:
         cmd_id = msg.get("id")
         if cmd_id is not None and cmd_id in self._pending_cdp:
-            fut = self._pending_cdp.pop(cmd_id)
+            fut = self._pending_cdp[cmd_id]
             if not fut.done():
+                # When a command was sent via DC (ceki-cmd data channel),
+                # the relay also echoes a WS cdp_response that races ahead
+                # but has empty result for large payloads (screenshot).
+                # Skip the WS echo and wait for the DC response.
+                transport = getattr(fut, '_cdp_transport', 'ws')
+                is_from_ws = msg.get("type") == "cdp_response" or "session_id" in msg
+                if transport == 'dc' and is_from_ws:
+                    log.debug("cdp: skip WS echo for DC-sent command id=%s", cmd_id)
+                    return
+                self._pending_cdp.pop(cmd_id)
                 if msg.get("ok", True):
                     fut.set_result(msg.get("result", {}))
                 else:
