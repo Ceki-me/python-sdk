@@ -7,6 +7,7 @@ import logging
 import mimetypes
 import os
 import random
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Coroutine, Literal, cast
@@ -171,6 +172,7 @@ class Browser:
                     )
                     self._p2p_fallback = True
                     fut._cdp_transport = 'ws'  # type: ignore[attr-defined]
+                    log.debug("cdp: WS fallback sending cmd %d session=%s method=%s", cdp_id, self.session_id, cdp["method"])
                     await self._client._ws_send(
                         {
                             "type": "cdp",
@@ -208,10 +210,14 @@ class Browser:
                         "params": cdp.get("params", {}),
                     }
                 )
+            t0 = time.monotonic()
             result = await asyncio.wait_for(asyncio.shield(fut), timeout=timeout)
+            log.debug("cdp: cmd %d resolved in %.1fs", cdp_id, time.monotonic() - t0)
             return result
         finally:
-            self._pending_cdp.pop(cdp_id, None)
+            popped = self._pending_cdp.pop(cdp_id, None)
+            if popped is not None and not popped.done():
+                log.debug("cdp: cmd %d future still pending when popped from _pending_cdp!", cdp_id)
 
     def on_event(self, callback: EventCallback) -> None:
         self._event_callbacks.append(callback)
@@ -887,6 +893,7 @@ class Browser:
 
     async def _on_cdp_response(self, msg: dict[str, Any]) -> None:
         cmd_id = msg.get("id")
+        log.debug("_on_cdp_response: id=%s pending_keys=%s", cmd_id, list(self._pending_cdp.keys()))
         if cmd_id is not None and cmd_id in self._pending_cdp:
             fut = self._pending_cdp[cmd_id]
             if not fut.done():
@@ -896,15 +903,20 @@ class Browser:
                 # Skip the WS echo and wait for the DC response.
                 transport = getattr(fut, '_cdp_transport', 'ws')
                 is_from_ws = msg.get("type") == "cdp_response" or "session_id" in msg
+                log.debug("_on_cdp_response: transport=%s is_from_ws=%s skip=%s", transport, is_from_ws, transport == 'dc' and is_from_ws)
                 if transport == 'dc' and is_from_ws:
                     log.debug("cdp: skip WS echo for DC-sent command id=%s", cmd_id)
                     return
                 self._pending_cdp.pop(cmd_id)
                 if msg.get("ok", True):
+                    log.debug("_on_cdp_response: resolving future with OK")
                     fut.set_result(msg.get("result", {}))
                 else:
                     err = msg.get("error", {})
+                    log.debug("_on_cdp_response: resolving future with error %s", err)
                     fut.set_exception(Exception(f"CDP error {err}"))
+        else:
+            log.debug("_on_cdp_response: id=%s NOT in pending (keys=%s) or None", cmd_id, list(self._pending_cdp.keys()))
 
     async def _on_cdp_event(self, msg: dict[str, Any]) -> None:
         method = msg.get("method", "")

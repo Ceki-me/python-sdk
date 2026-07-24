@@ -445,6 +445,15 @@ class Client:
                     name="p2p_ice_candidate",
                 )
             return
+        if mtype == "webrtc.answer":
+            session_id = msg.get("session_id", "")
+            sdp = msg.get("sdp", "")
+            if self._p2p is not None and sdp:
+                asyncio.create_task(
+                    self._p2p_set_remote(sdp, session_id[:8]),
+                    name=f"p2p_answer_{session_id[:8]}",
+                )
+            return
         if mtype == "resume_ok":
             sid = msg.get("session_id", "")
             fut = self._pending_resumes.pop(sid, None)
@@ -468,6 +477,8 @@ class Client:
         if mtype == "cdp_response":
             session_id = msg.get("session_id", "")
             browser = self._active_browsers.get(session_id)
+            log.debug("WS cdp_response: sid=%s browser=%s active=%s msg_id=%s ok=%s",
+                       session_id, bool(browser), list(self._active_browsers.keys()), msg.get("id"), msg.get("ok"))
             if browser:
                 await browser._on_cdp_response(msg)
             return
