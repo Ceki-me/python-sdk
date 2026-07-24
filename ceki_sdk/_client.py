@@ -396,7 +396,7 @@ class Client:
                 sdp = msg.get("sdp", "")
                 if sdp:
                     asyncio.create_task(
-                        self._p2p.set_remote_description(sdp, type="answer"),
+                        self._p2p_set_remote(sdp, session_id[:8]),
                         name=f"p2p_answer_{session_id[:8]}",
                     )
             return
@@ -626,6 +626,25 @@ class Client:
 
             transport.on_cdp_message = _on_cdp
 
+            # Wire connection state callback for lifecycle monitoring
+            async def _on_conn_state(state: str) -> None:
+                log.info("p2p: connection state -> %s", state)
+                if self._closed:
+                    return
+                if state == "failed":
+                    log.warning("p2p: WebRTC connection failed — will use WS fallback")
+                    if self._p2p is not None:
+                        await self._p2p.close()
+                        self._p2p = None
+
+            transport.on_connection_state = _on_conn_state
+
+            # Wire data channel state callback for lifecycle monitoring
+            async def _on_dc_state(state: str) -> None:
+                log.info("p2p: ceki-cmd DC state -> %s", state)
+
+            transport.on_data_channel_state = _on_dc_state
+
             self._p2p = transport
 
         try:
@@ -651,3 +670,26 @@ class Client:
             if self._p2p is not None:
                 await self._p2p.close()
                 self._p2p = None
+
+    async def _p2p_set_remote(self, sdp: str, sid_short: str) -> None:
+        """Set remote description from webrtc.answer with logging."""
+        try:
+            if self._p2p:
+                await self._p2p.set_remote_description(sdp, type="answer")
+                log.info("p2p: remote description set for session %s", sid_short)
+        except Exception as exc:
+            log.warning("p2p: set_remote_description failed: %s", exc)
+
+    async def _signal_shutdown(self, sig) -> None:
+        """Cleanup on SIGINT/SIGTERM — close all browsers + disconnect."""
+        log.warning(
+            "received signal %s, shutting down",
+            sig.name if hasattr(sig, 'name') else sig,
+        )
+        await self.close()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()

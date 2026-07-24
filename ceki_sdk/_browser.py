@@ -101,6 +101,9 @@ class Browser:
         self._last_pointer: tuple[int, int] | None = None
         self._last_seen_ts: str | None = None
 
+        # P2P seamless fallback — once DC fails, stay on WS for this session
+        self._p2p_fallback: bool = False
+
     @property
     def session_id(self) -> str:
         return self._match.session_id
@@ -125,6 +128,12 @@ class Browser:
     def provider_user_id(self) -> int | None:
         return self._match.provider_user_id
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
     async def send(self, cdp: dict[str, Any], *, timeout: float = 60.0) -> dict[str, Any]:
         if self._ended.is_set():
             raise SessionEnded(self._ended_reason or "ended")
@@ -142,16 +151,34 @@ class Browser:
         fut._cdp_transport = 'dc' if using_dc else 'ws'  # type: ignore[attr-defined]
         self._pending_cdp[cdp_id] = fut
         try:
-            if using_dc:
+            if using_dc and not self._p2p_fallback:
                 # P2P path: send CDP over ceki-cmd data channel
-                await p2p.send_cdp({
-                    "session_id": self.session_id,
-                    "id": cdp_id,
-                    "method": cdp["method"],
-                    "params": cdp.get("params", {}),
-                })
+                try:
+                    await p2p.send_cdp({
+                        "session_id": self.session_id,
+                        "id": cdp_id,
+                        "method": cdp["method"],
+                        "params": cdp.get("params", {}),
+                    })
+                except (ConnectionError, OSError, Exception) as exc:
+                    log.warning(
+                        "cdp: P2P DC send failed for cmd %d: %s — fallback to WS",
+                        cdp_id, exc,
+                    )
+                    self._p2p_fallback = True
+                    fut._cdp_transport = 'ws'  # type: ignore[attr-defined]
+                    await self._client._ws_send(
+                        {
+                            "type": "cdp",
+                            "session_id": self.session_id,
+                            "id": cdp_id,
+                            "method": cdp["method"],
+                            "params": cdp.get("params", {}),
+                        }
+                    )
             else:
-                # WS path (fallback — used before P2P connects or when forced off)
+                # WS path (fallback — used before P2P connects, when forced off,
+                # or after a DC failure for this session)
                 await self._client._ws_send(
                     {
                         "type": "cdp",
