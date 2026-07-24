@@ -251,7 +251,7 @@ class Client:
         """
         fut: asyncio.Future[Match] = asyncio.get_event_loop().create_future()
         self._pending_attach[schedule_id] = fut
-        await self._ws_send({"type": "attach", "browser_id": schedule_id})
+        await self._ws_send({"type": "attach", "schedule_id": schedule_id})
         try:
             match = await asyncio.wait_for(fut, timeout=90)
         except asyncio.TimeoutError:
