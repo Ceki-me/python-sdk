@@ -142,7 +142,7 @@ class Browser:
         loop = asyncio.get_event_loop()
         fut: asyncio.Future[Any] = loop.create_future()
         p2p = self._client._p2p
-        using_dc = p2p is not None and p2p.cmd_dc_open
+        using_dc = p2p is not None
         # Tag the future so _on_cdp_response knows which transport
         # the response is expected on. When sent via DC, the WS relay
         # echoes a cdp_response that arrives first but has empty result
@@ -152,14 +152,34 @@ class Browser:
         self._pending_cdp[cdp_id] = fut
         try:
             if using_dc and not self._p2p_fallback:
-                # P2P path: send CDP over ceki-cmd data channel
+                # P2P path: wait for DC readiness then send CDP over DC.
+                # The wait prevents a startup race where CDP goes over WS
+                # before the DataChannel opens, congesting the WS with CDP
+                # and starving the heartbeat ping → false 4002 timeout.
                 try:
+                    await asyncio.wait_for(p2p.wait_dc_open(), timeout=5.0)
                     await p2p.send_cdp({
                         "session_id": self.session_id,
                         "id": cdp_id,
                         "method": cdp["method"],
                         "params": cdp.get("params", {}),
                     })
+                except asyncio.TimeoutError:
+                    log.warning(
+                        "cdp: P2P DC not ready within 5s for cmd %d — fallback to WS",
+                        cdp_id,
+                    )
+                    self._p2p_fallback = True
+                    fut._cdp_transport = 'ws'  # type: ignore[attr-defined]
+                    await self._client._ws_send(
+                        {
+                            "type": "cdp",
+                            "session_id": self.session_id,
+                            "id": cdp_id,
+                            "method": cdp["method"],
+                            "params": cdp.get("params", {}),
+                        }
+                    )
                 except (ConnectionError, OSError, Exception) as exc:
                     log.warning(
                         "cdp: P2P DC send failed for cmd %d: %s — fallback to WS",

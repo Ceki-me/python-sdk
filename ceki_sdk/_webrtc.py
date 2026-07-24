@@ -178,6 +178,10 @@ class WebRTCTransport:
         self.on_connection_state: Callable[[str], Coroutine[Any, Any, None] | None] | None = None
         self.on_data_channel_state: Callable[[str], Coroutine[Any, Any, None] | None] | None = None
 
+        # DataChannel open event — used by _browser.send() to wait for DC
+        # readiness before sending CDP (prevents startup-race WS congestion).
+        self._dc_open_event = asyncio.Event()
+
     async def _ensure_pc(self) -> Any:
         """Lazy-create the RTCPeerConnection on first use."""
         if self._pc is not None:
@@ -241,6 +245,7 @@ class WebRTCTransport:
         @channel.on("open")
         async def _on_open() -> None:
             log.info("webrtc: ceki-cmd DC opened")
+            self._dc_open_event.set()
             if self.on_data_channel_state:
                 await self.on_data_channel_state("open")
 
@@ -268,6 +273,9 @@ class WebRTCTransport:
         so the SDP includes it (mirrors front setupCmdChannel).
         """
         pc = await self._ensure_pc()
+
+        # Reset DC-open event for the new connection
+        self._dc_open_event.clear()
 
         # Create ceki-cmd data channel (renter→host CDP commands)
         self._cmd_dc = pc.createDataChannel("ceki-cmd", ordered=True)
@@ -433,6 +441,15 @@ class WebRTCTransport:
             return False
         return self._cmd_dc.readyState == "open"
 
+    async def wait_dc_open(self) -> None:
+        """Wait for the ceki-cmd data channel to open.
+
+        Used by ``Browser.send()`` to prevent CDP from being sent over WS
+        before P2P DC is ready (startup-race guard). The caller wraps this
+        with ``asyncio.wait_for`` for timeout handling.
+        """
+        await self._dc_open_event.wait()
+
     async def close(self) -> None:
         """Close the peer connection and cleanup."""
         self._closed = True
@@ -448,6 +465,7 @@ class WebRTCTransport:
             except Exception:
                 pass
             self._pc = None
+        self._dc_open_event.clear()
         self._local_fingerprint = None
         self._pending_remote_candidates.clear()
         log.info("webrtc: transport closed")
