@@ -520,6 +520,8 @@ async def test_browser_send_p2p_path_when_dc_open():
     p2p_mock = MagicMock()
     p2p_mock.cmd_dc_open = True
     p2p_mock.send_cdp = AsyncMock()
+    # Mock wait_dc_open() to succeed immediately (DC is ready)
+    p2p_mock.wait_dc_open = AsyncMock()
 
     client = MagicMock()
     client._p2p = p2p_mock
@@ -566,49 +568,46 @@ async def test_browser_send_p2p_path_when_dc_open():
 
 
 @pytest.mark.asyncio
-async def test_dispatch_webrtc_answer_sets_ice_servers():
-    """webrtc.answer dispatch should call set_ice_servers on the transport."""
+async def test_dispatch_webrtc_answer_sets_remote_description():
+    """webrtc.answer dispatch should call set_remote_description on the transport."""
     from ceki_sdk._client import Client
 
     c = Client(api_key="test", relay_url="ws://localhost:9999",
                api_url="https://api.example.com", chat_url="https://chat.example.com")
     p2p_mock = MagicMock()
     p2p_mock.set_remote_description = AsyncMock()
+    # Mock wait_dc_open to succeed immediately
+    p2p_mock.wait_dc_open = AsyncMock()
     c._p2p = p2p_mock
 
     answer_msg = {
         "type": "webrtc.answer",
         "session_id": "test",
         "sdp": "v=0\r\n",
-        "ice_servers": [{"urls": "turn:relay.example.com:3478", "username": "u", "credential": "p"}],
     }
     await c._dispatch(answer_msg)
 
-    p2p_mock.set_ice_servers.assert_called_once_with(
-        [{"urls": "turn:relay.example.com:3478", "username": "u", "credential": "p"}]
-    )
+    p2p_mock.set_remote_description.assert_called_once_with("v=0\r\n", type="answer")
 
 
 @pytest.mark.asyncio
-async def test_dispatch_webrtc_answer_stores_ice_servers():
-    """webrtc.answer should update _p2p_ice_servers on Client."""
+async def test_dispatch_webrtc_answer_no_ice_servers():
+    """webrtc.answer without ice_servers should not crash."""
     from ceki_sdk._client import Client
 
     c = Client(api_key="test", relay_url="ws://localhost:9999",
                api_url="https://api.example.com", chat_url="https://chat.example.com")
     p2p_mock = MagicMock()
     p2p_mock.set_remote_description = AsyncMock()
+    # Mock wait_dc_open to succeed immediately
+    p2p_mock.wait_dc_open = AsyncMock()
     c._p2p = p2p_mock
 
-    answer_msg = {
-        "type": "webrtc.answer",
-        "session_id": "test",
-        "sdp": "v=0\r\n",
-        "ice_servers": [{"urls": "turn:relay.example.com:3478"}],
-    }
+    answer_msg = {"type": "webrtc.answer", "session_id": "test", "sdp": "v=0\r\n"}
+    # Should not raise
     await c._dispatch(answer_msg)
 
-    assert c._p2p_ice_servers == [{"urls": "turn:relay.example.com:3478"}]
+    p2p_mock.set_remote_description.assert_called_once_with("v=0\r\n", type="answer")
 
 
 @pytest.mark.asyncio

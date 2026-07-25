@@ -461,10 +461,7 @@ class Client:
             session_id = msg.get("session_id", "")
             sdp = msg.get("sdp", "")
             if self._p2p is not None and sdp:
-                asyncio.create_task(
-                    self._p2p_set_remote(sdp, session_id[:8]),
-                    name=f"p2p_answer_{session_id[:8]}",
-                )
+                await self._p2p_set_remote(sdp, session_id[:8])
             return
         if mtype == "resume_ok":
             sid = msg.get("session_id", "")
@@ -707,7 +704,6 @@ class Client:
             transport.on_data_channel_state = _on_dc_state
 
             self._p2p = transport
-            self._p2p_ready.set()
 
         try:
             offer_sdp = await transport.create_offer()
@@ -728,10 +724,21 @@ class Client:
             })
         except Exception as exc:
             log.error("p2p: failed to create/send offer: %s", exc)
-            # Fallback: P2P failed, WS path continues to work
             if self._p2p is not None:
                 await self._p2p.close()
                 self._p2p = None
+            return
+
+        # Wait for DC to open after offer is sent (DC was created inside create_offer).
+        # Signal _p2p_ready only when DC is actually usable — rent() waits on this
+        # and Browser.send() skips the 30s wait_dc_open() timeout for the first CDP.
+        try:
+            await asyncio.wait_for(transport.wait_dc_open(), timeout=15.0)
+            self._p2p_ready.set()
+        except asyncio.TimeoutError:
+            log.warning("p2p: DC not open within 15s — P2P disabled, WS fallback")
+            await transport.close()
+            self._p2p = None
 
     async def _init_p2p_from_offer(
         self, session_id: str, msg: dict[str, Any],
@@ -805,7 +812,6 @@ class Client:
             transport.on_data_channel_state = _on_dc_state
 
             self._p2p = transport
-            self._p2p_ready.set()
 
         try:
             sdp = msg.get("sdp", "")
@@ -830,6 +836,16 @@ class Client:
             if self._p2p is not None:
                 await self._p2p.close()
                 self._p2p = None
+            return
+
+        # Wait for DC to open after answer was sent (DC was created inside create_answer).
+        try:
+            await asyncio.wait_for(transport.wait_dc_open(), timeout=15.0)
+            self._p2p_ready.set()
+        except asyncio.TimeoutError:
+            log.warning("p2p: DC not open within 15s — P2P disabled, WS fallback")
+            await transport.close()
+            self._p2p = None
 
     async def _p2p_set_remote(self, sdp: str, sid_short: str) -> None:
         """Set remote description from webrtc.answer with logging."""
