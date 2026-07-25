@@ -75,6 +75,8 @@ class Client:
         )
         # ICE servers discovered from webrtc.answer (set by relay)
         self._p2p_ice_servers: list[dict[str, Any]] | None = None
+        # Signaled when P2P transport is created (self._p2p is set)
+        self._p2p_ready = asyncio.Event()
 
     def _ws_extra_headers(self) -> dict[str, str]:
         if not self._basic_auth:
@@ -209,6 +211,16 @@ class Client:
             except ValueError:
                 pass
             raise TimeoutError("rent timed out waiting for match")
+
+        # Wait for P2P WebRTC transport to initialize before returning Browser.
+        # Otherwise Browser.send() races with _init_p2p() — first CDP falls back
+        # to WS because self._p2p is still None.
+        if self._p2p_enabled and not self._p2p_ready.is_set():
+            try:
+                await asyncio.wait_for(self._p2p_ready.wait(), timeout=15)
+            except asyncio.TimeoutError:
+                log.warning("P2P transport not ready within 15s, CDP will use WS path")
+
         browser = Browser(client=self, match=match, human=human)
         self._active_browsers[match.session_id] = browser
         if not masking_mode:
@@ -695,6 +707,7 @@ class Client:
             transport.on_data_channel_state = _on_dc_state
 
             self._p2p = transport
+            self._p2p_ready.set()
 
         try:
             offer_sdp = await transport.create_offer()
@@ -792,6 +805,7 @@ class Client:
             transport.on_data_channel_state = _on_dc_state
 
             self._p2p = transport
+            self._p2p_ready.set()
 
         try:
             sdp = msg.get("sdp", "")

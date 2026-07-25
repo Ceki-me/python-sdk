@@ -153,12 +153,18 @@ class Browser:
         self._pending_cdp[cdp_id] = fut
         try:
             if using_dc and not self._p2p_fallback:
-                # P2P path: wait for DC readiness then send CDP over DC.
-                # The wait prevents a startup race where CDP goes over WS
-                # before the DataChannel opens, congesting the WS with CDP
-                # and starving the heartbeat ping → false 4002 timeout.
+                # P2P path (preferred): wait for DC readiness then send CDP over DC.
+                # The wait prevents a startup race where CDP goes over WS before the
+                # DataChannel opens, congesting WS and starving the heartbeat ping.
+                #
+                # TimeoutError (DC still negotiating): WS for this one command, next
+                # retries P2P — _p2p_fallback NOT set, so first CDP after DC opens
+                # goes via P2P automatically.
+                #
+                # ConnectionError/OSError (DC broken): permanent WS fallback via
+                # _p2p_fallback to avoid 30s wait on every subsequent command.
                 try:
-                    await asyncio.wait_for(p2p.wait_dc_open(), timeout=5.0)
+                    await asyncio.wait_for(p2p.wait_dc_open(), timeout=30.0)
                     await p2p.send_cdp({
                         "session_id": self.session_id,
                         "id": cdp_id,
@@ -167,10 +173,9 @@ class Browser:
                     })
                 except asyncio.TimeoutError:
                     log.warning(
-                        "cdp: P2P DC not ready within 5s for cmd %d — fallback to WS",
+                        "cdp: P2P DC not ready within 30s for cmd %d — WS fallback for this cmd",
                         cdp_id,
                     )
-                    self._p2p_fallback = True
                     fut._cdp_transport = 'ws'  # type: ignore[attr-defined]
                     log.debug("cdp: WS fallback sending cmd %d session=%s method=%s", cdp_id, self.session_id, cdp["method"])
                     await self._client._ws_send(
