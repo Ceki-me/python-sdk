@@ -16,3 +16,6 @@ venv/
 htmlcov/
 examples/*.log
 graphify-out/
+.claude/
+.graphifyignore
+.mypy_cache/

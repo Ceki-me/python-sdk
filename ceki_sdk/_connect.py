@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import signal
 from dataclasses import dataclass
 
 from ._client import Client
@@ -29,4 +31,20 @@ async def connect(api_key: str, options: ConnectOptions | None = None) -> Client
         basic_auth=options.basic_auth,
     )
     await client._connect()
+
+    # Register cleanup signal handlers for orphan prevention
+    try:
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(
+                    sig, lambda s=sig: asyncio.create_task(
+                        client._signal_shutdown(s),
+                    ),
+                )
+            except NotImplementedError:
+                pass  # Windows
+    except RuntimeError:
+        pass  # no running loop
+
     return client

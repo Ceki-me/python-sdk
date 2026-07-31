@@ -7,6 +7,7 @@ import logging
 import mimetypes
 import os
 import random
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Coroutine, Literal, cast
@@ -101,6 +102,9 @@ class Browser:
         self._last_pointer: tuple[int, int] | None = None
         self._last_seen_ts: str | None = None
 
+        # P2P seamless fallback — once DC fails, stay on WS for this session
+        self._p2p_fallback: bool = False
+
     @property
     def session_id(self) -> str:
         return self._match.session_id
@@ -125,6 +129,12 @@ class Browser:
     def provider_user_id(self) -> int | None:
         return self._match.provider_user_id
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
     async def send(self, cdp: dict[str, Any], *, timeout: float = 60.0) -> dict[str, Any]:
         if self._ended.is_set():
             raise SessionEnded(self._ended_reason or "ended")
@@ -132,21 +142,87 @@ class Browser:
         self._cdp_counter += 1
         loop = asyncio.get_event_loop()
         fut: asyncio.Future[Any] = loop.create_future()
+        p2p = self._client._p2p
+        using_dc = p2p is not None
+        # Tag the future so _on_cdp_response knows which transport
+        # the response is expected on. When sent via DC, the WS relay
+        # echoes a cdp_response that arrives first but has empty result
+        # for large payloads (screenshot). Skip the WS echo and wait
+        # for the DC response with full data.
+        fut._cdp_transport = 'dc' if using_dc else 'ws'  # type: ignore[attr-defined]
         self._pending_cdp[cdp_id] = fut
         try:
-            await self._client._ws_send(
-                {
-                    "type": "cdp",
-                    "session_id": self.session_id,
-                    "id": cdp_id,
-                    "method": cdp["method"],
-                    "params": cdp.get("params", {}),
-                }
-            )
+            if using_dc and not self._p2p_fallback:
+                # P2P path (preferred): wait for DC readiness then send CDP over DC.
+                # The wait prevents a startup race where CDP goes over WS before the
+                # DataChannel opens, congesting WS and starving the heartbeat ping.
+                #
+                # TimeoutError (DC still negotiating): WS for this one command, next
+                # retries P2P — _p2p_fallback NOT set, so first CDP after DC opens
+                # goes via P2P automatically.
+                #
+                # ConnectionError/OSError (DC broken): permanent WS fallback via
+                # _p2p_fallback to avoid 30s wait on every subsequent command.
+                try:
+                    await asyncio.wait_for(p2p.wait_dc_open(), timeout=30.0)
+                    await p2p.send_cdp({
+                        "session_id": self.session_id,
+                        "id": cdp_id,
+                        "method": cdp["method"],
+                        "params": cdp.get("params", {}),
+                    })
+                except asyncio.TimeoutError:
+                    log.warning(
+                        "cdp: P2P DC not ready within 30s for cmd %d — WS fallback for this cmd",
+                        cdp_id,
+                    )
+                    fut._cdp_transport = 'ws'  # type: ignore[attr-defined]
+                    log.debug("cdp: WS fallback sending cmd %d session=%s method=%s", cdp_id, self.session_id, cdp["method"])
+                    await self._client._ws_send(
+                        {
+                            "type": "cdp",
+                            "session_id": self.session_id,
+                            "id": cdp_id,
+                            "method": cdp["method"],
+                            "params": cdp.get("params", {}),
+                        }
+                    )
+                except (ConnectionError, OSError, Exception) as exc:
+                    log.warning(
+                        "cdp: P2P DC send failed for cmd %d: %s — fallback to WS",
+                        cdp_id, exc,
+                    )
+                    self._p2p_fallback = True
+                    fut._cdp_transport = 'ws'  # type: ignore[attr-defined]
+                    await self._client._ws_send(
+                        {
+                            "type": "cdp",
+                            "session_id": self.session_id,
+                            "id": cdp_id,
+                            "method": cdp["method"],
+                            "params": cdp.get("params", {}),
+                        }
+                    )
+            else:
+                # WS path (fallback — used before P2P connects, when forced off,
+                # or after a DC failure for this session)
+                await self._client._ws_send(
+                    {
+                        "type": "cdp",
+                        "session_id": self.session_id,
+                        "id": cdp_id,
+                        "method": cdp["method"],
+                        "params": cdp.get("params", {}),
+                    }
+                )
+            t0 = time.monotonic()
             result = await asyncio.wait_for(asyncio.shield(fut), timeout=timeout)
+            log.debug("cdp: cmd %d resolved in %.1fs", cdp_id, time.monotonic() - t0)
             return result
         finally:
-            self._pending_cdp.pop(cdp_id, None)
+            popped = self._pending_cdp.pop(cdp_id, None)
+            if popped is not None and not popped.done():
+                log.debug("cdp: cmd %d future still pending when popped from _pending_cdp!", cdp_id)
 
     def on_event(self, callback: EventCallback) -> None:
         self._event_callbacks.append(callback)
@@ -822,14 +898,30 @@ class Browser:
 
     async def _on_cdp_response(self, msg: dict[str, Any]) -> None:
         cmd_id = msg.get("id")
+        log.debug("_on_cdp_response: id=%s pending_keys=%s", cmd_id, list(self._pending_cdp.keys()))
         if cmd_id is not None and cmd_id in self._pending_cdp:
-            fut = self._pending_cdp.pop(cmd_id)
+            fut = self._pending_cdp[cmd_id]
             if not fut.done():
+                # When a command was sent via DC (ceki-cmd data channel),
+                # the relay also echoes a WS cdp_response that races ahead
+                # but has empty result for large payloads (screenshot).
+                # Skip the WS echo and wait for the DC response.
+                transport = getattr(fut, '_cdp_transport', 'ws')
+                is_from_ws = msg.get("type") == "cdp_response" or "session_id" in msg
+                log.debug("_on_cdp_response: transport=%s is_from_ws=%s skip=%s", transport, is_from_ws, transport == 'dc' and is_from_ws)
+                if transport == 'dc' and is_from_ws:
+                    log.debug("cdp: skip WS echo for DC-sent command id=%s", cmd_id)
+                    return
+                self._pending_cdp.pop(cmd_id)
                 if msg.get("ok", True):
+                    log.debug("_on_cdp_response: resolving future with OK")
                     fut.set_result(msg.get("result", {}))
                 else:
                     err = msg.get("error", {})
+                    log.debug("_on_cdp_response: resolving future with error %s", err)
                     fut.set_exception(Exception(f"CDP error {err}"))
+        else:
+            log.debug("_on_cdp_response: id=%s NOT in pending (keys=%s) or None", cmd_id, list(self._pending_cdp.keys()))
 
     async def _on_cdp_event(self, msg: dict[str, Any]) -> None:
         method = msg.get("method", "")
