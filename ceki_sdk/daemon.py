@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from . import ConnectOptions, connect
+from ._browser import _unwrap_screenshot_data
 from ._exceptions import SessionNotFound
 
 log = logging.getLogger(__name__)
@@ -214,7 +215,7 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
         browser = await self._resolve_browser(params)
         full = params.get("full", False)
         resp = await browser.screenshot(format="base64", full_page=full)
-        data = resp.get("data", "") if isinstance(resp, dict) else resp
+        data = _unwrap_screenshot_data(resp) if isinstance(resp, dict) else resp
         return {"data": data}
 
     async def _handle_snapshot(self, params: dict) -> dict:

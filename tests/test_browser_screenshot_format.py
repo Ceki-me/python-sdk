@@ -39,7 +39,7 @@ async def test_screenshot_base64_returns_dict(browser: Browser):
     browser.send = AsyncMock(return_value=cdp_resp)
     result = await browser.screenshot(format="base64")
     assert isinstance(result, dict)
-    assert result is cdp_resp
+    assert result == {"data": "AAAA"}
 
 
 async def test_screenshot_png_returns_bytes(browser: Browser):
@@ -109,3 +109,48 @@ async def test_screenshot_default_no_full_page(browser: Browser):
     sent = browser.send.call_args.args[0]
     assert sent["method"] == "Page.captureScreenshot"
     assert sent.get("params", {}).get("captureBeyondViewport") is None
+
+
+def test_unwrap_screenshot_data_flat_and_nested_equal():
+    from ceki_sdk._browser import _unwrap_screenshot_data
+
+    flat = {"data": "AAAA"}
+    nested = {"result": {"data": "AAAA"}}
+    assert _unwrap_screenshot_data(flat) == _unwrap_screenshot_data(nested) == "AAAA"
+
+    # Non-data / malformed shapes fall back to an empty string.
+    assert _unwrap_screenshot_data({}) == ""
+    assert _unwrap_screenshot_data({"result": {}}) == ""
+    assert _unwrap_screenshot_data({"result": {"data": 123}}) == ""
+    assert _unwrap_screenshot_data(None) == ""
+    assert _unwrap_screenshot_data("not a dict") == ""
+
+
+async def test_screenshot_base64_double_nested_unwraps(browser: Browser):
+    browser.send = AsyncMock(return_value={"result": {"data": "AAAA"}})
+    result = await browser.screenshot(format="base64")
+    assert result == {"data": "AAAA"}
+
+
+async def test_screenshot_png_double_nested_unwraps(browser: Browser):
+    raw = b"\x89PNG_NESTED"
+    nested = {"result": {"data": base64.b64encode(raw).decode()}}
+    browser.send = AsyncMock(return_value=nested)
+    result = await browser.screenshot(format="png")
+    assert isinstance(result, bytes)
+    assert result == raw
+
+
+async def test_screenshot_png_double_nested_empty_returns_empty_bytes(browser: Browser):
+    browser.send = AsyncMock(return_value={"result": {"data": ""}})
+    result = await browser.screenshot(format="png")
+    assert result == b""
+
+
+async def test_snapshot_double_nested_unwraps(browser: Browser):
+    png_b64 = base64.b64encode(b"\x89PNG\r\n").decode()
+    browser.send = AsyncMock(return_value={"result": {"data": png_b64}})
+    browser.chat.history = AsyncMock(return_value=[])
+    snap = await browser.snapshot()
+    assert snap.screenshot == png_b64
+    assert snap.chat == []
