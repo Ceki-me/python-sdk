@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 from . import ConnectOptions, connect
+from ._browser import _unwrap_screenshot_data
 from ._exceptions import (
     AuthFailed,
     CaptchaTimeoutError,
@@ -699,7 +700,7 @@ async def _cmd_screenshot(args: argparse.Namespace) -> None:
             "full": args.full,
         })
         if result is not None:
-            data = base64.b64decode(result.get("data", ""))
+            data = base64.b64decode(_unwrap_screenshot_data(result))
             with open(args.output, "wb") as f:
                 f.write(data)
             _out({"ok": True, "path": args.output})

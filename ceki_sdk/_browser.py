@@ -72,6 +72,21 @@ def _resolve_human(human) -> Humanizer | None:
     raise ValueError(f"Invalid human profile: {human!r}")
 
 
+def _unwrap_screenshot_data(resp: Any) -> str:
+    """Extract the base64 screenshot payload from a captureScreenshot response.
+
+    Some extension versions wrap the Page.captureScreenshot result as
+    ``{"result": {"data": ...}}`` instead of the flat ``{"data": ...}`` shape.
+    Handle both so a screenshot never silently degrades to empty bytes.
+    """
+    if isinstance(resp, dict):
+        nested = resp.get("result")
+        if isinstance(nested, dict) and isinstance(nested.get("data"), str):
+            return nested["data"]
+        return resp.get("data", "")
+    return ""
+
+
 class Browser:
     def __init__(self, client: "Client", match: Match, *, human="natural") -> None:
         self._client = client
@@ -476,9 +491,9 @@ class Browser:
         if self._humanizer:
             await self._humanizer.after("screenshot")
         if format == "base64":
-            return resp
+            return {"data": _unwrap_screenshot_data(resp)}
         import base64 as _b64
-        data = resp.get("data", "")
+        data = _unwrap_screenshot_data(resp)
         return _b64.b64decode(data) if data else b""
 
     async def snapshot(self, *, timeout: float = 120.0) -> Snapshot:
@@ -489,7 +504,7 @@ class Browser:
             {"method": "Page.captureScreenshot", "params": {"optimizeForSpeed": True}},
             timeout=timeout,
         )
-        screenshot_b64 = resp.get("data", "")
+        screenshot_b64 = _unwrap_screenshot_data(resp)
         all_msgs = await self.chat.history(since=self._last_seen_ts)
         if self._last_seen_ts and all_msgs:
             all_msgs = [m for m in all_msgs if m.created_at > self._last_seen_ts]
