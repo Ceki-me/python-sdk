@@ -232,6 +232,30 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
     return 1
 
 
+def _cmd_provider(args: argparse.Namespace) -> int:
+    """Deploy a browser provider (``ceki provider run``).
+
+    Long-running: launches Chromium + the Ceki extension, injects the token,
+    brings the browser online and stays alive until SIGTERM/SIGINT.
+    """
+    from ._provider import ProviderError, run_provider
+
+    try:
+        return run_provider(
+            token=args.token,
+            ext_dir=args.ext_dir,
+            api_base=args.api_url,
+            schedule_id=args.schedule_id,
+            timeout=args.timeout,
+            verbose=args.verbose,
+        )
+    except ProviderError as e:
+        _err(str(e), "provider")
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
 async def _cmd_rent(args: argparse.Namespace) -> None:
     # Auto-start daemon on rent — subsequent commands use the persistent WS
     if not _ensure_daemon():
@@ -1536,6 +1560,43 @@ def build_parser() -> argparse.ArgumentParser:
     dsub.add_parser("stop", help="Stop daemon (SIGTERM)")
     dsub.add_parser("status", help="Check daemon status")
 
+    # ── provider subcommand ───────────────────────────────────────────
+    p_provider = sub.add_parser(
+        "provider",
+        help="Run a browser provider — rent out this machine's browser",
+    )
+    psub = p_provider.add_subparsers(dest="provider_action", required=True)
+    p_run = psub.add_parser(
+        "run",
+        help=(
+            "Deploy a browser provider (Chromium + Ceki extension + token) "
+            "and keep it online, auto-accepting rentals"
+        ),
+    )
+    p_run.add_argument(
+        "--token",
+        help="Provider extension token (default: $CEKI_PROVIDER_TOKEN)",
+    )
+    p_run.add_argument(
+        "--ext-dir",
+        help="Path to the unpacked Ceki extension dist (default: $CEKI_PROVIDER_EXT_DIR)",
+    )
+    p_run.add_argument(
+        "--api-url",
+        help="Backend API base URL (default: $CEKI_API_URL or https://api.ceki.me)",
+    )
+    p_run.add_argument(
+        "--schedule-id",
+        type=int,
+        help="Browser/schedule ID (default: derived from /api/browser/me)",
+    )
+    p_run.add_argument(
+        "--timeout",
+        type=int,
+        help="Run for N seconds then exit (default: run until stopped)",
+    )
+    p_run.add_argument("--verbose", action="store_true", help="Verbose logging")
+
     return parser
 
 
@@ -1576,6 +1637,9 @@ def main() -> None:
 
     if args.command == "daemon":
         sys.exit(_cmd_daemon(args))
+
+    if args.command == "provider":
+        sys.exit(_cmd_provider(args))
 
     handler = handlers.get(args.command)
     if not handler:

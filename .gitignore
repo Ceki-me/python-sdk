@@ -19,3 +19,7 @@ graphify-out/
 .claude/
 .graphifyignore
 .mypy_cache/
+
+# Extension dist staged by docker/build.sh at build time — never committed.
+docker/extension/
+docker/extension/.gitkeep

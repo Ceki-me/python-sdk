@@ -19,6 +19,7 @@ from ._exceptions import (
 )
 from ._models import BrowserOption, ChatMessage, Match, ReadReceipt, SessionInfo, Snapshot
 from ._profile import BrowserProfile
+from ._provider import ProviderError, run_provider
 from .humanize import HumanProfile
 
 __version__ = "2.36.1"
@@ -38,6 +39,8 @@ __all__ = [
     "AuthFailed",
     "ConnectionLost",
     "ProviderDisconnected",
+    "run_provider",
+    "ProviderError",
     "SessionNotFound",
     "SessionExpired",
     "NotOwner",

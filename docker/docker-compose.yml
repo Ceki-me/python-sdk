@@ -1,0 +1,21 @@
+# Docker-compose reference for the ceki headless-browser provider.
+# Token must be provided at runtime (never commit it here).
+#
+#   docker compose -f docker/docker-compose.yml up --build -d
+#   docker compose -f docker/docker-compose.yml logs -f provider
+#   docker compose -f docker/docker-compose.yml stop provider
+
+services:
+  provider:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: ceki/provider:dev
+    environment:
+      # REQUIRED: the one-time browser token from your account dashboard.
+      - CEKI_PROVIDER_TOKEN=${CEKI_PROVIDER_TOKEN:?set CEKI_PROVIDER_TOKEN}
+      # Optional: override the API base URL (defaults to https://api.ceki.me).
+      - CEKI_API_URL=${CEKI_API_URL:-}
+      - DISPLAY=:99
+    # One provider browser per container. Scale to run more (each needs its own token).
+    restart: unless-stopped

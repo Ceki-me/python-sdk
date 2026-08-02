@@ -1,0 +1,17 @@
+# Python build artifacts / local files that must not enter the build context.
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+.env
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.graphifyignore
+graphify-out/
+.git/
+.gitignore

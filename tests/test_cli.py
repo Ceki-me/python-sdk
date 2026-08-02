@@ -475,3 +475,42 @@ async def test_snapshot_returns_data():
     assert snap.screenshot == png_data
     assert snap.chat == []
     assert snap.ts is not None
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Provider command parser
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def test_parser_provider_run():
+    parser = build_parser()
+    args = parser.parse_args(
+        ["provider", "run", "--token", "tok-1", "--ext-dir", "/ext/dist",
+         "--api-url", "https://api.ceki.me", "--schedule-id", "7", "--timeout", "90"]
+    )
+    assert args.command == "provider"
+    assert args.provider_action == "run"
+    assert args.token == "tok-1"
+    assert args.ext_dir == "/ext/dist"
+    assert args.api_url == "https://api.ceki.me"
+    assert args.schedule_id == 7
+    assert args.timeout == 90
+    assert args.verbose is False
+
+
+def test_parser_provider_run_defaults():
+    parser = build_parser()
+    args = parser.parse_args(["provider", "run"])
+    assert args.command == "provider"
+    assert args.token is None
+    assert args.ext_dir is None
+    assert args.api_url is None
+    assert args.schedule_id is None
+    assert args.timeout is None
+    assert args.verbose is False
+
+
+def test_parser_provider_requires_subcommand():
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["provider"])

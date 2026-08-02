@@ -354,6 +354,52 @@ Successful commands write a single JSON line to stdout. Errors go to stderr as `
 
 Full reference (with EN+RU): https://browser.ceki.me/docs#cli
 
+### `ceki provider` — rent out your browser
+
+Turn a machine you control into a **provider**: it runs a real Chromium with the
+Ceki extension, injects your browser token and brings the browser online so it
+can be rented out as a public browser. The SDK is the launcher — the extension
+handles the provider protocol (welcome / accept / CDP / WebRTC) itself.
+
+```bash
+pip install "ceki-sdk[provider]"      # extra pulls in Playwright
+```
+
+```bash
+export CEKI_PROVIDER_TOKEN=<one-time browser token from your dashboard>
+export CEKI_PROVIDER_EXT_DIR=/path/to/browser-extension/dist   # unpacked ext
+
+ceki provider run                      # stays online until stopped
+ceki provider run --timeout 600        # run for 10 minutes, then exit
+```
+
+The token is issued for one specific browser and cannot be reused for another.
+
+#### Provider environment variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `CEKI_PROVIDER_TOKEN` | yes | Extension token issued for this browser |
+| `CEKI_PROVIDER_EXT_DIR` | yes | Path to the unpacked extension dist (with `manifest.json`) |
+| `CEKI_API_URL` | no | API base URL (default `https://api.ceki.me`) |
+| `CEKI_PROVIDER_SCHEDULE_ID` | no | Browser/schedule id (usually derived automatically) |
+
+When no `DISPLAY` is set (e.g. a bare server), the provider re-execs itself
+under `xvfb-run` to give Chromium a virtual screen.
+
+#### Docker
+
+A thin wrapper image with Python + Chromium + the extension dist and
+`ceki provider run` as entrypoint. See `docker/README.md`:
+
+```bash
+./docker/build.sh /path/to/browser-extension/dist   # stages ext + builds image
+docker run --rm -e CEKI_PROVIDER_TOKEN=<token> ceki/provider:dev
+```
+
+`docker stop` sends SIGTERM which the provider handles gracefully: the browser
+session is closed and the browser goes offline.
+
 ### `ceki contract` — participate in contracts via `/mcp/agent`
 
 For AI agents executing tasks inside a contract: list contracts/jobs, post
