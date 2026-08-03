@@ -16,6 +16,9 @@ services:
       - CEKI_PROVIDER_TOKEN=${CEKI_PROVIDER_TOKEN:?set CEKI_PROVIDER_TOKEN}
       # Optional: override the API base URL (defaults to https://api.ceki.me).
       - CEKI_API_URL=${CEKI_API_URL:-}
+      # Inherit the host timezone so the provider browser's local time matches
+      # the IP geolocation (ev-5421 self-fingerprint consistency).
+      - TZ=${TZ:-}
       - DISPLAY=:99
     # One provider browser per container. Scale to run more (each needs its own token).
     restart: unless-stopped

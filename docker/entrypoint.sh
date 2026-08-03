@@ -12,6 +12,13 @@
 
 set -e
 
+# Inherit a non-UTC timezone so the provider browser matches the IP geolocation
+# (ev-5421). Priority: TZ env (compose passes ${TZ:-}) → /etc/timezone.
+if [ -z "${TZ:-}" ] && [ -f /etc/timezone ]; then
+  TZ="$(cat /etc/timezone)"
+  export TZ
+fi
+
 if [ -z "${DISPLAY:-}" ]; then
   export DISPLAY=:99
 fi

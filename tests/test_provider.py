@@ -89,3 +89,15 @@ def test_resolve_api_base_strips_api_suffix_trailing_slash(monkeypatch):
     _clean_provider_env(monkeypatch)
     monkeypatch.setenv("CEKI_API_URL", "https://api.example.test/api/")
     assert resolve_api_base(None) == "https://api.example.test"
+
+
+def test_chrome_args_include_ev5421_quality_flags():
+    from ceki_sdk._provider import _CHROME_ARGS
+    joined = " ".join(_CHROME_ARGS)
+    # audio consistency
+    assert "--use-fake-ui-for-media-stream" in joined
+    assert "--use-fake-device-for-media-stream" in joined
+    # automation marker
+    assert "--disable-blink-features=AutomationControlled" in joined
+    # language/locale consistency
+    assert "--lang=en-US" in joined

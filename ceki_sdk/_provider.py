@@ -54,6 +54,15 @@ _CHROME_ARGS = [
     "--no-sandbox",
     "--disable-gpu",
     "--disable-dev-shm-usage",
+    # ev-5421 self-fingerprint quality fixes:
+    # fake media devices make AudioContext non-empty (removes the
+    # "Audio context empty (headless indicator)" consistency penalty)
+    "--use-fake-ui-for-media-stream",
+    "--use-fake-device-for-media-stream",
+    # kill the remaining "Chrome is being controlled" automation marker
+    "--disable-blink-features=AutomationControlled",
+    # deterministic, consistent accept-language/locale
+    "--lang=en-US",
 ]
 
 # JS helpers injected into the extension panel page.  ``arg`` is supplied by
@@ -268,6 +277,34 @@ class ProviderContext:
     api_base: str
 
 
+def _ensure_timezone() -> None:
+    """Ensure a non-UTC TZ is set so the provider browser matches the IP geolocation.
+
+    Priority: the ``TZ`` env var (docker-compose passes the host TZ via
+    ``TZ=${TZ:-}``), then ``/etc/timezone`` (Debian images).  Chromium launched
+    by Playwright inherits ``TZ`` and reports the matching local time, which
+    removes the "IP tz != browser tz" leak penalty in the self-fingerprint scan.
+    Best effort — never raises, never hardcodes a region.
+    """
+    tz = os.environ.get("TZ")
+    if not tz:
+        try:
+            tzfile = Path("/etc/timezone")
+            if tzfile.is_file():
+                tz = tzfile.read_text().strip()
+        except Exception:
+            tz = None
+    if not tz:
+        return
+    os.environ["TZ"] = tz
+    try:
+        if hasattr(time, "tzset"):
+            time.tzset()
+    except Exception:
+        pass
+    log.info("provider timezone: %s", tz)
+
+
 def _discover_ext_id(context: Any, wait_s: float = 15.0) -> str | None:
     deadline = time.time() + wait_s
     while time.time() < deadline:
@@ -338,6 +375,8 @@ def _launch_provider(
     api_base: str,
     schedule_id: int | None,
 ) -> ProviderContext:
+    _ensure_timezone()
+
     chromium = playwright.chromium
     profile_dir = tempfile.mkdtemp(prefix="ceki-provider-")
     default_dir = Path(profile_dir) / "Default"
