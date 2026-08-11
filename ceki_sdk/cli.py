@@ -112,19 +112,26 @@ async def _daemon_request(
     path: str,
     params: dict[str, Any] | None = None,
     timeout: float = 120.0,
-) -> Any:
+) -> tuple[bool, Any]:
     """Send an IPC request to a running daemon.
 
-    Returns ``None`` when the daemon is not running (clean fallback for the
-    caller).  Raises ``CekiError`` when the daemon *was* expected to be
+    Returns ``(False, None)`` when the daemon is not running (clean fallback
+    for the caller).  Raises ``CekiError`` when the daemon *was* expected to be
     reachable but isn't — the caller shows the error to the user instead of
     falling back to one-shot mode.
+
+    Returns ``(True, result)`` on success.  ``result`` may be ``None`` for
+    void commands (navigate/click/type/scroll/switch_tab/configure/stop/
+    profile_import) — a null result is a SUCCESS, not a failure signal.  The
+    caller MUST branch on the first tuple element, never on ``result`` alone,
+    otherwise a successful void command falls through to the one-shot resume
+    fallback which disconnects and kills the rented session.
 
     The function checks ``PID_FILE`` first as a fast-path; if absent there is
     no running daemon.  If present but unreachable we clean the stale file.
     """
     if not PID_FILE.exists():
-        return None  # daemon not running → clean fallback
+        return False, None  # daemon not running → clean fallback
 
     port = daemon_port()
     url = f"http://{DAEMON_HOST}:{port}{path}"
@@ -139,10 +146,10 @@ async def _daemon_request(
             body = resp.json()
             if not body.get("ok"):
                 raise CekiError(body.get("error", "daemon error"))
-            return body.get("result")
+            return True, body.get("result")
     except httpx.ConnectError:
         PID_FILE.unlink(missing_ok=True)
-        return None  # stale PID → clean fallback
+        return False, None  # stale PID → clean fallback
     except httpx.TimeoutException:
         raise CekiError("daemon not responding (timeout), start daemon first")
     except httpx.HTTPError as e:
@@ -265,12 +272,12 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
     # Try daemon IPC
     fp_from = str(Path(args.fingerprint_from).resolve()) if args.fingerprint_from else None
     try:
-        result = await _daemon_request("/rent", {
+        ok, result = await _daemon_request("/rent", {
             "schedule": args.schedule,
             "mode": args.mode,
             "fingerprint_from": fp_from,
         })
-        if result is not None:
+        if ok:
             sid = result["session_id"]
             save_session(sid, {
                 "session_id": sid,
@@ -319,8 +326,8 @@ async def _resume_browser(api_key: str, session_id: str):
 async def _cmd_snapshot(args: argparse.Namespace) -> None:
     # Try daemon IPC
     try:
-        result = await _daemon_request("/snapshot", {"session_id": args.session_id})
-        if result is not None:
+        ok, result = await _daemon_request("/snapshot", {"session_id": args.session_id})
+        if ok:
             png_bytes = base64.b64decode(result["screenshot"]) if result.get("screenshot") else b""
             out_path = args.output
             with open(out_path, "wb") as f:
@@ -364,12 +371,12 @@ def _human_flag(args: argparse.Namespace) -> bool | None:
 async def _cmd_navigate(args: argparse.Namespace) -> None:
     # Try daemon IPC
     try:
-        result = await _daemon_request("/navigate", {
+        ok, result = await _daemon_request("/navigate", {
             "session_id": args.session_id,
             "url": args.url,
             "human": _human_flag(args),
         })
-        if result is not None:
+        if ok:
             _out({"ok": True})
             return
     except CekiError as e:
@@ -390,13 +397,13 @@ async def _cmd_navigate(args: argparse.Namespace) -> None:
 async def _cmd_click(args: argparse.Namespace) -> None:
     # Try daemon IPC
     try:
-        result = await _daemon_request("/click", {
+        ok, result = await _daemon_request("/click", {
             "session_id": args.session_id,
             "x": args.x,
             "y": args.y,
             "human": _human_flag(args),
         })
-        if result is not None:
+        if ok:
             _out({"ok": True, "pointer": [args.x, args.y]})
             return
     except CekiError as e:
@@ -421,13 +428,13 @@ async def _cmd_type(args: argparse.Namespace) -> None:
     # --natural is a no-op alias kept for backwards compatibility.
     # Try daemon IPC
     try:
-        result = await _daemon_request("/type", {
+        ok, result = await _daemon_request("/type", {
             "session_id": args.session_id,
             "text": args.text,
             "selector": args.selector,
             "human": _human_flag(args),
         })
-        if result is not None:
+        if ok:
             _out({"ok": True})
             return
     except CekiError as e:
@@ -448,14 +455,14 @@ async def _cmd_type(args: argparse.Namespace) -> None:
 async def _cmd_scroll(args: argparse.Namespace) -> None:
     # Try daemon IPC
     try:
-        result = await _daemon_request("/scroll", {
+        ok, result = await _daemon_request("/scroll", {
             "session_id": args.session_id,
             "x": args.x,
             "y": args.y,
             "dy": args.dy,
             "human": _human_flag(args),
         })
-        if result is not None:
+        if ok:
             _out({"ok": True})
             return
     except CekiError as e:
@@ -477,21 +484,21 @@ async def _cmd_chat(args: argparse.Namespace) -> None:
     # Try daemon IPC
     try:
         if args.chat_action == "send":
-            result = await _daemon_request("/chat/send", {
+            ok, result = await _daemon_request("/chat/send", {
                 "session_id": args.session_id,
                 "text": args.text,
             })
-            if result is not None:
+            if ok:
                 _out({"ok": True, "message_id": result.get("message_id")})
                 return
         elif args.chat_action == "next":
             last_seen = get_last_seen_ts(args.session_id)
-            result = await _daemon_request("/chat/next", {
+            ok, result = await _daemon_request("/chat/next", {
                 "session_id": args.session_id,
                 "timeout": args.timeout,
                 "since": last_seen,
             })
-            if result is not None:
+            if ok:
                 if result:  # has message
                     update_last_seen_ts(args.session_id, result["ts"])
                 _out(result)  # None → no message
@@ -505,12 +512,12 @@ async def _cmd_chat(args: argparse.Namespace) -> None:
                     since = datetime.fromtimestamp(ts_val, tz=timezone.utc).isoformat()
                 except ValueError:
                     since = args.since
-            result = await _daemon_request("/chat/history", {
+            ok, result = await _daemon_request("/chat/history", {
                 "session_id": args.session_id,
                 "since": since,
                 "limit": args.limit,
             })
-            if result is not None:
+            if ok:
                 _out(result)
                 return
     except CekiError as e:
@@ -571,8 +578,8 @@ async def _cmd_chat(args: argparse.Namespace) -> None:
 async def _cmd_stop(args: argparse.Namespace) -> None:
     # Try daemon IPC
     try:
-        result = await _daemon_request("/stop", {"session_id": args.session_id})
-        if result is not None:
+        ok, result = await _daemon_request("/stop", {"session_id": args.session_id})
+        if ok:
             delete_session(args.session_id)
             _out({"ok": True})
             return
@@ -597,12 +604,12 @@ async def _cmd_profile(args: argparse.Namespace) -> None:
     try:
         if args.profile_action == "export":
             domains = ",".join(args.domains) if args.domains else None
-            result = await _daemon_request("/profile/export", {
+            ok, result = await _daemon_request("/profile/export", {
                 "session_id": args.session_id,
                 "domains": domains,
                 "no_session_storage": args.no_session_storage,
             })
-            if result is not None:
+            if ok:
                 with open(args.output, "w") as f:
                     json.dump(result, f)
                 _out({"ok": True, "path": args.output})
@@ -610,11 +617,11 @@ async def _cmd_profile(args: argparse.Namespace) -> None:
         elif args.profile_action == "import":
             with open(args.input, "r") as f:
                 profile_dict = json.load(f)
-            result = await _daemon_request("/profile/import", {
+            ok, result = await _daemon_request("/profile/import", {
                 "session_id": args.session_id,
                 "profile": profile_dict,
             })
-            if result is not None:
+            if ok:
                 _out({"ok": True})
                 return
     except CekiError as e:
@@ -719,11 +726,11 @@ async def _cmd_wait(args: argparse.Namespace) -> None:
 async def _cmd_screenshot(args: argparse.Namespace) -> None:
     # Try daemon IPC
     try:
-        result = await _daemon_request("/screenshot", {
+        ok, result = await _daemon_request("/screenshot", {
             "session_id": args.session_id,
             "full": args.full,
         })
-        if result is not None:
+        if ok:
             data = base64.b64decode(_unwrap_screenshot_data(result))
             with open(args.output, "wb") as f:
                 f.write(data)
@@ -749,8 +756,8 @@ async def _cmd_screenshot(args: argparse.Namespace) -> None:
 async def _cmd_switch_tab(args: argparse.Namespace) -> None:
     # Try daemon IPC
     try:
-        result = await _daemon_request("/switch-tab", {"session_id": args.session_id})
-        if result is not None:
+        ok, result = await _daemon_request("/switch-tab", {"session_id": args.session_id})
+        if ok:
             _out({"ok": True})
             return
     except CekiError as e:
@@ -776,8 +783,8 @@ async def _cmd_configure(args: argparse.Namespace) -> None:
             params["masking_mode"] = args.masking_mode
         if args.fingerprint is not None:
             params["fingerprint"] = args.fingerprint
-        result = await _daemon_request("/configure", params)
-        if result is not None:
+        ok, result = await _daemon_request("/configure", params)
+        if ok:
             _out({"ok": True})
             return
     except CekiError as e:
@@ -1017,6 +1024,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     qa=args.qa,
                     participants=extra_parts or None,
                     tags=tags,
+                    files=args.file or None,
                 ))
             elif action == "comment":
                 # `--label` → label (short header), `--desc` → description
@@ -1047,6 +1055,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     amount=args.amount,
                     currency=args.currency,
                     benefitable=args.benefitable,
+                    files=args.file or None,
                 ))
             elif action == "propose":
                 tags = _parse_tags(args.tags) if getattr(args, "tags", None) else None
@@ -1065,6 +1074,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     amount=args.amount,
                     currency=args.currency,
                     benefitable=args.benefitable,
+                    files=args.file or None,
                     settings=settings,
                 ))
             elif action == "edit":
@@ -1084,6 +1094,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     amount=args.amount,
                     currency=args.currency,
                     benefitable=args.benefitable,
+                    files=args.file or None,
                     settings=settings,
                 ))
             elif action == "progress":
@@ -1091,6 +1102,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     args.eid,
                     status=args.status,
                     desc=args.desc,
+                    files=args.file or None,
                 ))
             elif action == "vote":
                 ids = [int(s) for s in str(args.ids).split(",") if s.strip()]
@@ -1099,6 +1111,12 @@ def _cmd_contract(args: argparse.Namespace) -> int:
             elif action == "poll":
                 items = cli.poll()
                 _contract_dump({"count": len(items), "notifications": items})
+            elif action == "upload-file":
+                _contract_dump(cli.upload_file(
+                    args.path,
+                    filename=args.filename,
+                    mime=args.mime,
+                ))
             elif action == "watch":
                 sec = max(6, int(args.interval or 8))
                 sys.stderr.write(
@@ -1167,12 +1185,12 @@ async def _cmd_cdp(args: argparse.Namespace) -> None:
     # Try daemon IPC
     params = json.loads(args.params) if args.params else {}
     try:
-        result = await _daemon_request("/cdp", {
+        ok, result = await _daemon_request("/cdp", {
             "session_id": args.session_id,
             "method": args.method,
             "params": params,
         })
-        if result is not None:
+        if ok:
             _out(result)
             return
     except CekiError as e:
@@ -1436,6 +1454,16 @@ def build_parser() -> argparse.ArgumentParser:
             "'backend:Backend:#ff0000'."
         ),
     )
+    p_cc.add_argument(
+        "--file",
+        action="append",
+        default=[],
+        dest="file",
+        help=(
+            "Repeatable. Local file path to attach to the task "
+            "(uploaded to the backend first)."
+        ),
+    )
 
     p_cco = csub.add_parser("comment", help="Post comment on event")
     p_cco.add_argument("eid", type=int)
@@ -1450,6 +1478,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_cco.add_argument("--currency")
     p_cco.add_argument("--benefitable")
     p_cco.add_argument("--desc")
+    p_cco.add_argument(
+        "--file",
+        action="append",
+        default=[],
+        dest="file",
+        help=(
+            "Repeatable. Local file path to attach to the comment "
+            "(uploaded to the backend first)."
+        ),
+    )
 
     p_cp = csub.add_parser("propose", help="Propose correction")
     p_cp.add_argument("eid", type=int)
@@ -1469,6 +1507,16 @@ def build_parser() -> argparse.ArgumentParser:
             "Project tags (sugar for settings.tags[]). Comma-separated, each "
             "item key[:label[:color]]. E.g. 'backend,urgent' or "
             "'backend:Backend:#ff0000'. back/2796 persists onto the event."
+        ),
+    )
+    p_cp.add_argument(
+        "--file",
+        action="append",
+        default=[],
+        dest="file",
+        help=(
+            "Repeatable. Local file path to attach in the correction "
+            "(uploaded to the backend first)."
         ),
     )
 
@@ -1492,6 +1540,16 @@ def build_parser() -> argparse.ArgumentParser:
             "'backend:Backend:#ff0000'."
         ),
     )
+    p_edit.add_argument(
+        "--file",
+        action="append",
+        default=[],
+        dest="file",
+        help=(
+            "Repeatable. Local file path to attach in the edit/correction "
+            "(uploaded to the backend first)."
+        ),
+    )
 
     p_cpr = csub.add_parser(
         "progress",
@@ -1500,11 +1558,29 @@ def build_parser() -> argparse.ArgumentParser:
     p_cpr.add_argument("eid", type=int)
     p_cpr.add_argument("--status", type=int)
     p_cpr.add_argument("--desc", required=True)
+    p_cpr.add_argument(
+        "--file",
+        action="append",
+        default=[],
+        dest="file",
+        help=(
+            "Repeatable. Local file path to attach to the progress comment "
+            "(uploaded to the backend first)."
+        ),
+    )
 
     p_cv = csub.add_parser("vote", help="Vote on correction(s)")
     p_cv.add_argument("eid", type=int)
     p_cv.add_argument("--ids", required=True, help="Comma-separated correction IDs")
     p_cv.add_argument("--vote", required=True, help="true|false")
+
+    p_cuf = csub.add_parser(
+        "upload-file",
+        help="Upload a file, print the user_files record (id/url)",
+    )
+    p_cuf.add_argument("path", help="Local file path to upload")
+    p_cuf.add_argument("--filename", help="Override filename (default: basename)")
+    p_cuf.add_argument("--mime", help="Override MIME type (default: guessed)")
 
     csub.add_parser("poll", help="Single agent polling tick")
 

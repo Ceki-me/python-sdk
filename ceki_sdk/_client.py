@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import time
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -66,6 +67,11 @@ class Client:
         self._last_pong = 0.0
         self._closed = False
         self._stashed_first_frame: str | None = None
+
+        # Optional hook invoked on ``session.ended``/``session_end``.  The
+        # daemon uses it to drop the session from its registry and close the
+        # shared WebSocket once the last session for a client is gone.
+        self._on_session_ended: Callable[[str], Awaitable[None]] | None = None
 
         # P2P WebRTC transport (primary, WS = fallback)
         self._p2p: WebRTCTransport | None = None
@@ -508,6 +514,14 @@ class Client:
             browser = self._active_browsers.get(session_id)
             if browser:
                 await browser._on_session_ended(msg)
+            # Notify the daemon so it can drop the session from its registry and
+            # close the shared WS once the last session for this client is gone.
+            hook = self._on_session_ended
+            if hook is not None:
+                try:
+                    await hook(session_id)
+                except Exception as exc:
+                    log.error("session.ended hook failed: %s", exc)
             return
         if mtype == "session.provider_disconnected":
             session_id = msg.get("session_id", "")

@@ -514,3 +514,119 @@ def test_parser_provider_requires_subcommand():
     parser = build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["provider"])
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Bug 1 regression: void commands with a null daemon result.
+# A successful void command (navigate/click/type/stop/...) comes back as
+# {"ok": true, "result": null}.  _daemon_request now returns (True, None) for
+# that — branching on `result is not None` used to fall through to the one-shot
+# resume path, which disconnects and kills the rented session.
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class _FakeResp:
+    def __init__(self, body: dict):
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+async def test_daemon_request_void_result_none_is_success(tmp_path: Path):
+    """_daemon_request returns (True, None) for a successful void command."""
+    from ceki_sdk.cli import _daemon_request
+
+    pid = tmp_path / "ceki-daemon.pid"
+    pid.write_text("12345")
+
+    class _FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, *a, **k):
+            return _FakeResp({"ok": True, "result": None})
+
+    with (
+        patch("ceki_sdk.cli.PID_FILE", pid),
+        patch("ceki_sdk.cli.httpx.AsyncClient", _FakeAsyncClient),
+    ):
+        ok, result = await _daemon_request("/navigate", {"session_id": "s1"})
+
+    assert ok is True
+    assert result is None
+
+
+async def test_daemon_request_absent_returns_false(tmp_path: Path):
+    """No PID file → (False, None) so the caller runs the one-shot fallback."""
+    from ceki_sdk.cli import _daemon_request
+
+    with patch("ceki_sdk.cli.PID_FILE", tmp_path / "missing.pid"):
+        ok, result = await _daemon_request("/navigate", {"session_id": "s1"})
+
+    assert ok is False
+    assert result is None
+
+
+async def test_navigate_void_ok_null_result_does_not_resume(tmp_path: Path):
+    """Bug 1: navigate with {'ok': true, 'result': null} must print ok and must
+    NOT call _resume_browser (the one-shot fallback disconnects the client and
+    kills the session)."""
+    import argparse
+
+    from ceki_sdk.cli import _cmd_navigate
+
+    pid = tmp_path / "ceki-daemon.pid"
+    pid.write_text("12345")
+
+    class _FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, *a, **k):
+            return _FakeResp({"ok": True, "result": None})
+
+    with (
+        patch("ceki_sdk.cli.PID_FILE", pid),
+        patch("ceki_sdk.cli.httpx.AsyncClient", _FakeAsyncClient),
+        patch("ceki_sdk.cli._resume_browser", AsyncMock()) as resume,
+        patch("ceki_sdk.cli._out") as out,
+    ):
+        args = argparse.Namespace(session_id="s1", url="https://example.com")
+        await _cmd_navigate(args)
+
+    resume.assert_not_awaited()
+    out.assert_called_once_with({"ok": True})
+
+
+async def test_navigate_no_daemon_falls_back_to_oneshot(tmp_path: Path):
+    """Reverse path: daemon absent → (False, None) → one-shot fallback works."""
+    import argparse
+
+    from ceki_sdk.cli import _cmd_navigate
+
+    client = AsyncMock()
+    client._ws = AsyncMock()
+    browser = AsyncMock()
+
+    with (
+        patch("ceki_sdk.cli.PID_FILE", tmp_path / "missing.pid"),
+        patch("ceki_sdk.cli._get_api_key", return_value="key"),
+        patch(
+            "ceki_sdk.cli._resume_browser",
+            AsyncMock(return_value=(client, browser)),
+        ) as resume,
+        patch("ceki_sdk.cli._out") as out,
+    ):
+        args = argparse.Namespace(session_id="s1", url="https://example.com")
+        await _cmd_navigate(args)
+
+    resume.assert_awaited_once()
+    browser.navigate.assert_awaited_once()
+    out.assert_called_once_with({"ok": True})
