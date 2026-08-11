@@ -199,6 +199,77 @@ async def test_client_dispatch_session_end_alias_invokes_hook():
 
 
 @pytest.mark.asyncio
+async def test_client_dispatch_relay_session_ended_event_id_invokes_hook():
+    """The relay's real ``session_ended`` (underscore, id in ``event_id``) must
+    reach the daemon hook — otherwise relay-initiated ends (provider death,
+    admin stop, backend reaper) leak the session and its shared WS."""
+    client = Client(
+        api_key="k",
+        relay_url="wss://relay/ws/agent",
+        api_url="https://api",
+        chat_url="https://chat",
+        reconnect=False,
+    )
+    client._ws = AsyncMock()
+    client._ws.send = AsyncMock()
+
+    browser = Mock()
+    browser.session_id = "s11"
+    browser._on_session_ended = AsyncMock()
+    client._active_browsers["s11"] = browser
+
+    ended: list[str] = []
+
+    async def hook(session_id: str) -> None:
+        ended.append(session_id)
+
+    client._on_session_ended = hook
+    await client._dispatch({
+        "type": "session_ended",
+        "event_id": "s11",
+        "reason": "provider_disconnected",
+    })
+    assert ended == ["s11"]
+    browser._on_session_ended.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_client_dispatch_error_1011_with_event_id_cleans_session():
+    """error -1011 (provider death, grace expiry) is a session end: it must
+    clean the browser AND notify the daemon hook, not just log an unhandled
+    relay error (which previously left the session/WS alive forever)."""
+    client = Client(
+        api_key="k",
+        relay_url="wss://relay/ws/agent",
+        api_url="https://api",
+        chat_url="https://chat",
+        reconnect=False,
+    )
+    client._ws = AsyncMock()
+    client._ws.send = AsyncMock()
+
+    browser = Mock()
+    browser.session_id = "s12"
+    browser._on_session_ended = AsyncMock()
+    client._active_browsers["s12"] = browser
+
+    ended: list[str] = []
+
+    async def hook(session_id: str) -> None:
+        ended.append(session_id)
+
+    client._on_session_ended = hook
+    await client._dispatch({
+        "type": "error",
+        "code": -1011,
+        "event_id": "s12",
+        "reason": "provider_disconnected",
+    })
+    assert ended == ["s12"]
+    browser._on_session_ended.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_shared_client_keeps_exactly_one_ws(mock_relay):
     """After N rents+closes on a shared client the relay sees EXACTLY 1 WS (not N),
     and it drops to 0 once the last session ends.  End-to-end over a real local
@@ -254,9 +325,11 @@ async def test_shared_client_keeps_exactly_one_ws(mock_relay):
         assert len(mock_relay.connections) == 1
         assert daemon._sessions == {"sess-B": b2}
 
-        # Last session ends → shared client disconnects → no orphan WS.
+        # Last session ends via the relay's REAL format (``session_ended`` +
+        # ``event_id``, as sent by finishSession on provider death / admin stop)
+        # → shared client disconnects → no orphan WS.
         await mock_relay.send_to_all(
-            {"type": "session.ended", "session_id": "sess-B", "reason": "completed"}
+            {"type": "session_ended", "event_id": "sess-B", "reason": "completed"}
         )
         for _ in range(50):
             if len(mock_relay.connections) == 0:
@@ -264,3 +337,78 @@ async def test_shared_client_keeps_exactly_one_ws(mock_relay):
             await asyncio.sleep(0.05)
         assert len(mock_relay.connections) == 0
         assert daemon._sessions == {}
+
+
+@pytest.mark.asyncio
+async def test_provider_death_cleans_session_and_ws(mock_relay):
+    """QA repro: on provider death the relay sends ``session.provider_disconnected``,
+    then after grace ``error -1011`` + ``session_ended`` (id in ``event_id``).
+    The daemon must drop the dead session and close the shared WS — previously
+    ``session_ended`` was silently ignored, leaving a live WS and a zombie entry."""
+    from ceki_sdk import ConnectOptions, connect
+
+    url = f"ws://127.0.0.1:{mock_relay.port}/ws/agent"
+    daemon = DaemonServer()
+
+    with patch.dict(
+        "os.environ",
+        {"CEKI_FORCE_WS": "1", "CEKI_HUMAN_DISABLE": "1"},
+    ):
+        client = await connect("test-key", ConnectOptions(relay_url=url))
+        client._on_session_ended = daemon._on_session_ended
+
+        async def ack_rent(session_id: str) -> None:
+            await asyncio.sleep(0.05)
+            ev_id = f"ev-{session_id}"
+            await mock_relay.send_to_all(
+                {"type": "rent_pending", "event_id": ev_id, "schedule_id": 1}
+            )
+            await asyncio.sleep(0.02)
+            await mock_relay.send_to_all({
+                "type": "match",
+                "event_id": ev_id,
+                "session_id": session_id,
+                "schedule_id": 1,
+                "chat_topic_id": None,
+                "browser_info": {},
+            })
+
+        t = asyncio.create_task(ack_rent("sess-C"))
+        browser = await client.rent(1)
+        await t
+
+        assert len(mock_relay.connections) == 1
+        daemon._clients = {"test-key": client}
+        daemon._sessions = {"sess-C": browser}
+
+        # 1) Provider goes down → grace starts. Session stays tracked (provider
+        #    may rejoin), the WS stays up.
+        await mock_relay.send_to_all({
+            "type": "session.provider_disconnected",
+            "session_id": "sess-C",
+            "retry_within_ms": 60000,
+        })
+        await asyncio.sleep(0.1)
+        assert daemon._sessions == {"sess-C": browser}
+        assert len(mock_relay.connections) == 1
+
+        # 2) Grace expires → relay reports the end (exact finishSession payloads).
+        await mock_relay.send_to_all({
+            "type": "error",
+            "code": -1011,
+            "event_id": "sess-C",
+            "reason": "provider_disconnected",
+        })
+        await mock_relay.send_to_all({
+            "type": "session_ended",
+            "event_id": "sess-C",
+            "reason": "provider_disconnected",
+        })
+
+        # Session dropped + shared client disconnected → no orphan WS.
+        for _ in range(50):
+            if not daemon._sessions and len(mock_relay.connections) == 0:
+                break
+            await asyncio.sleep(0.05)
+        assert daemon._sessions == {}
+        assert len(mock_relay.connections) == 0

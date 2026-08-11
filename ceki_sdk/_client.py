@@ -509,8 +509,14 @@ class Client:
             if browser:
                 await browser._on_tab_opened(msg)
             return
-        if mtype in ("session.ended", "session_end"):
-            session_id = msg.get("session_id", "")
+        if mtype in ("session.ended", "session_end", "session_ended"):
+            # The relay's session-end message is ``session_ended`` with the id in
+            # ``event_id`` (older aliases used ``session_id``).  Accept every form
+            # so relay-initiated ends (provider death, admin stop, backend reaper)
+            # are never dropped — otherwise the daemon would keep the session and
+            # its shared WS alive forever.
+            sid = msg.get("session_id") or msg.get("event_id")
+            session_id = str(sid) if sid else ""
             browser = self._active_browsers.get(session_id)
             if browser:
                 await browser._on_session_ended(msg)
@@ -566,9 +572,23 @@ class Client:
                 asyncio.create_task(browser.chat._on_send_error(msg))
             return
         if mtype == "error":
-            session_id = msg.get("session_id")
-            if session_id and session_id in self._active_browsers:
-                await self._active_browsers[session_id]._on_error(msg)
+            sid = msg.get("session_id") or msg.get("event_id")
+            session_id = str(sid) if sid else ""
+            browser = self._active_browsers.get(session_id) if session_id else None
+            if browser is not None and msg.get("code", 0) in (-1011, -1018):
+                # Relay reports a session end as ``error -1011/-1018`` (provider
+                # death, grace expiry, admin kill).  Clean up exactly like
+                # ``session_ended`` so the daemon never keeps a dead session.
+                await browser._on_session_ended(msg)
+                hook = self._on_session_ended
+                if hook is not None:
+                    try:
+                        await hook(session_id)
+                    except Exception as exc:
+                        log.error("session.ended hook failed: %s", exc)
+                return
+            if browser is not None:
+                await browser._on_error(msg)
             else:
                 self._handle_error(msg)
             return
