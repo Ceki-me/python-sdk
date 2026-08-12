@@ -30,7 +30,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5", "mypy>=1.10"]
-# Browser provider mode (ceki provider run / docker image). Playwright drives
+# Browser provider mode (ceki provider run). Playwright drives
 # Chromium; it is intentionally an extra so the base SDK stays dependency-light.
 provider = ["playwright>=1.40"]
 
