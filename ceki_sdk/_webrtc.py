@@ -182,6 +182,12 @@ class WebRTCTransport:
         # readiness before sending CDP (prevents startup-race WS congestion).
         self._dc_open_event = asyncio.Event()
 
+        # Chunk reassembly buffer for large CDP responses sent over the DC.
+        # Keyed by chunkId → {total, payloads:{seq:slice}, count}. Incomplete
+        # sets stay until the session ends (bounded by session lifetime);
+        # a lost chunk surfaces as an SDK-side timeout, existing mechanism.
+        self._pending_chunks: dict[str, dict[str, Any]] = {}
+
     async def _ensure_pc(self) -> Any:
         """Lazy-create the RTCPeerConnection on first use."""
         if self._pc is not None:
@@ -263,8 +269,63 @@ class WebRTCTransport:
                 log.warning("webrtc: failed to parse DC message: %s", exc)
                 return
 
+            # Chunked CDP responses (large messages from the extension) are
+            # reassembled transparently here — individual chunks are never
+            # forwarded to on_cdp_message.
+            if data.get("type") == "cdp-response-chunk":
+                restored = self._buffer_chunk(data)
+                if restored is None:
+                    return  # not complete yet (or malformed)
+                if self.on_cdp_message:
+                    await self.on_cdp_message(restored)
+                return
+
             if self.on_cdp_message:
                 await self.on_cdp_message(data)
+
+    def _buffer_chunk(self, chunk: dict[str, Any]) -> dict[str, Any] | None:
+        """Buffer one CDP chunk fragment and return the reassembled message.
+
+        Returns the fully restored message once all ``total`` fragments for a
+        ``chunkId`` have arrived (in any order); returns ``None`` otherwise.
+        Malformed fragments are dropped — a lost fragment surfaces as an
+        SDK-side timeout (existing mechanism).
+        """
+        chunk_id = chunk.get("chunkId")
+        seq = chunk.get("seq")
+        total = chunk.get("total")
+        payload = chunk.get("payload")
+        if (
+            not isinstance(chunk_id, str)
+            or not isinstance(seq, int)
+            or not isinstance(total, int)
+            or not isinstance(payload, str)
+        ):
+            log.warning("webrtc: malformed cdp-response-chunk, dropping")
+            return None
+
+        entry = self._pending_chunks.get(chunk_id)
+        if entry is None:
+            entry = {"total": total, "payloads": {}, "count": 0}
+            self._pending_chunks[chunk_id] = entry
+
+        if seq not in entry["payloads"]:
+            entry["payloads"][seq] = payload
+            entry["count"] += 1
+
+        if entry["count"] != entry["total"]:
+            return None
+
+        del self._pending_chunks[chunk_id]
+        parts = [entry["payloads"].get(i) for i in range(entry["total"])]
+        if any(p is None for p in parts):
+            log.warning("webrtc: chunked message %s missing fragments, dropping", chunk_id)
+            return None
+        try:
+            return json.loads("".join(parts))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            log.warning("webrtc: failed to reassemble chunked message %s: %s", chunk_id, exc)
+            return None
 
     async def create_offer(self) -> str:
         """Create and set local offer, return the SDP string.

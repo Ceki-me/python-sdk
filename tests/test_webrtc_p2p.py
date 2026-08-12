@@ -674,3 +674,166 @@ def test_client_p2p_disabled_via_env(monkeypatch):
     c = Client(api_key="test", relay_url="ws://localhost:9999",
                api_url="https://api.example.com", chat_url="https://chat.example.com")
     assert not c._p2p_enabled
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tests — chunked CDP responses over DC (cdp-response-chunk reassembly)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class _RecordingDC:
+    """Minimal fake data channel that captures registered event handlers."""
+
+    def __init__(self) -> None:
+        self.handlers: dict[str, Any] = {}
+
+    def on(self, event: str):
+        def deco(fn):
+            self.handlers[event] = fn
+            return fn
+
+        return deco
+
+
+def _make_transport_with_message_handler():
+    from ceki_sdk._webrtc import WebRTCTransport
+
+    t = WebRTCTransport()
+    dc = _RecordingDC()
+    t._wire_cmd_dc(dc)
+    return t, dc
+
+
+@pytest.mark.asyncio
+async def test_dc_small_message_passes_through_unchanged():
+    """A non-chunk message must reach on_cdp_message verbatim."""
+    t, dc = _make_transport_with_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_cdp_message = capture
+
+    msg = {"type": "cdp_response", "id": 1, "result": {"ok": True}}
+    await dc.handlers["message"](json.dumps(msg))
+
+    assert received == [msg]
+    assert t._pending_chunks == {}
+
+
+@pytest.mark.asyncio
+async def test_dc_chunked_message_reassembled():
+    """A chunked CDP response reassembles into the original message."""
+    t, dc = _make_transport_with_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_cdp_message = capture
+
+    original = {"type": "cdp_response", "id": 99, "result": {"data": "x" * 120_000}}
+    full = json.dumps(original)
+    # Mirror the extension's chunking constants
+    chunk_size = 48000
+    total = (len(full) + chunk_size - 1) // chunk_size
+    chunk_id = "chunk-test-1"
+    assert total > 1
+
+    for i in range(total):
+        chunk = {
+            "type": "cdp-response-chunk",
+            "chunkId": chunk_id,
+            "seq": i,
+            "total": total,
+            "payload": full[i * chunk_size : (i + 1) * chunk_size],
+        }
+        if i == 0:
+            chunk["meta"] = {"id": 99}
+        await dc.handlers["message"](json.dumps(chunk))
+
+    assert len(received) == 1
+    assert received[0] == original
+    assert t._pending_chunks == {}
+
+
+@pytest.mark.asyncio
+async def test_dc_chunk_reassembly_out_of_order():
+    """Chunks may arrive out of order; reassembly still yields the message."""
+    t, dc = _make_transport_with_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_cdp_message = capture
+
+    original = {"type": "cdp_response", "id": 55, "result": {"data": "y" * 120_000}}
+    full = json.dumps(original)
+    chunk_size = 48000
+    total = (len(full) + chunk_size - 1) // chunk_size
+    chunks = [
+        {
+            "type": "cdp-response-chunk",
+            "chunkId": "chunk-oo",
+            "seq": i,
+            "total": total,
+            "payload": full[i * chunk_size : (i + 1) * chunk_size],
+        }
+        for i in range(total)
+    ]
+    # Send in reverse order
+    for chunk in reversed(chunks):
+        await dc.handlers["message"](json.dumps(chunk))
+
+    assert len(received) == 1
+    assert received[0] == original
+
+
+@pytest.mark.asyncio
+async def test_dc_incomplete_chunk_set_not_forwarded():
+    """An incomplete chunk set must not reach on_cdp_message."""
+    t, dc = _make_transport_with_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_cdp_message = capture
+
+    full = json.dumps({"id": 1, "result": {"data": "z" * 120_000}})
+    chunk_size = 48000
+    total = (len(full) + chunk_size - 1) // chunk_size
+
+    # Send only the first two fragments of a multi-chunk message
+    for i in range(min(2, total - 1)):
+        chunk = {
+            "type": "cdp-response-chunk",
+            "chunkId": "chunk-incomplete",
+            "seq": i,
+            "total": total,
+            "payload": full[i * chunk_size : (i + 1) * chunk_size],
+        }
+        await dc.handlers["message"](json.dumps(chunk))
+
+    assert received == []
+    assert len(t._pending_chunks) == 1  # buffered, awaiting remaining fragments
+
+
+@pytest.mark.asyncio
+async def test_dc_malformed_chunk_dropped():
+    """A malformed chunk message is dropped without touching the buffer."""
+    t, dc = _make_transport_with_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_cdp_message = capture
+
+    bad = {"type": "cdp-response-chunk", "seq": 0, "total": 2}  # no chunkId/payload
+    await dc.handlers["message"](json.dumps(bad))
+
+    assert received == []
+    assert t._pending_chunks == {}
