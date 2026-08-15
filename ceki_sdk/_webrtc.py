@@ -177,7 +177,9 @@ class WebRTCTransport:
         # Callbacks — set by consumer (_client.py)
         self.on_ice_candidate: Callable[[dict[str, Any]], Coroutine[Any, Any, None] | None] | None = None
         self.on_cdp_message: Callable[[dict[str, Any]], Coroutine[Any, Any, None] | None] | None = None
-        self.on_capture_data: Callable[[dict[str, Any]], Coroutine[Any, Any, None] | None] | None = None
+        self.on_capture_data: (
+            Callable[[dict[str, Any]], Coroutine[Any, Any, None] | None] | None
+        ) = None
         self.on_connection_state: Callable[[str], Coroutine[Any, Any, None] | None] | None = None
         self.on_data_channel_state: Callable[[str], Coroutine[Any, Any, None] | None] | None = None
 

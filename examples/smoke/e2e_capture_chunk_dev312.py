@@ -15,8 +15,6 @@ import asyncio
 import base64
 import os
 import sys
-import time
-import traceback
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -34,7 +32,6 @@ async def main() -> int:
     frames: list[dict] = []
     reassembled_big = []   # frames whose data len > 48000 base64 chars (chunk threshold)
     raw_count = 0
-    got_capture_chunk = False
 
     client = await connect(API_KEY)
     try:
@@ -49,7 +46,11 @@ async def main() -> int:
             data = frame.get("data") or ""
             if len(data) > 48000:
                 reassembled_big.append(frame)
-                print(f"  [frame] big>48KB: data_len={len(data)} w={frame.get('width')} h={frame.get('height')} ts={frame.get('timestamp')}")
+                print(
+                    f"  [frame] big>48KB: data_len={len(data)} "
+                    f"w={frame.get('width')} h={frame.get('height')} "
+                    f"ts={frame.get('timestamp')}"
+                )
 
         browser.on_capture_frame(on_frame)
 
@@ -58,7 +59,9 @@ async def main() -> int:
         await asyncio.sleep(3)
 
         print("starting screencast ...")
-        await browser.start_screencast(maxWidth=1920, maxHeight=1080, quality=90, everyNthFrame=1, maxFrameRate=1)
+        await browser.start_screencast(
+            maxWidth=1920, maxHeight=1080, quality=90, everyNthFrame=1, maxFrameRate=1
+        )
         await asyncio.sleep(12)  # ~12 frames at 1fps
         await browser.stop_screencast()
 
@@ -88,7 +91,10 @@ async def main() -> int:
             # Check JPEG magic
             is_jpeg = img[:3] == b"\xff\xd8\xff"
             # rough blackness check: sample some bytes
-            print(f"  decode: {len(img)} bytes jpeg_magic={is_jpeg} w={f.get('width')} h={f.get('height')}")
+            print(
+                f"  decode: {len(img)} bytes jpeg_magic={is_jpeg} "
+                f"w={f.get('width')} h={f.get('height')}"
+            )
             if is_jpeg:
                 ok += 1
         except Exception as e:
