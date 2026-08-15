@@ -837,3 +837,195 @@ async def test_dc_malformed_chunk_dropped():
 
     assert received == []
     assert t._pending_chunks == {}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tests — capture-chunk reassembly on the ceki-capture DC
+# ──────────────────────────────────────────────────────────────────────────────
+
+_CHUNK_SIZE = 48000  # mirror the extension's sendCaptureChunked constant
+
+
+def _make_transport_with_capture_message_handler():
+    from ceki_sdk._webrtc import WebRTCTransport
+
+    t = WebRTCTransport()
+    dc = _RecordingDC()
+    t._wire_capture_dc(dc)
+    return t, dc
+
+
+def _capture_chunks_for(
+    original: dict[str, Any],
+    frame_id: str,
+    order: str = "asc",
+) -> list[dict[str, Any]]:
+    """Split a capture frame the way the extension's sendCaptureChunked does."""
+    full = json.dumps(original)
+    total = (len(full) + _CHUNK_SIZE - 1) // _CHUNK_SIZE
+    chunks: list[dict[str, Any]] = []
+    for i in range(total):
+        chunk: dict[str, Any] = {
+            "type": "capture-chunk",
+            "frameId": frame_id,
+            "seq": i,
+            "total": total,
+            "payload": full[i * _CHUNK_SIZE : (i + 1) * _CHUNK_SIZE],
+        }
+        if i == 0:
+            meta: dict[str, Any] = {}
+            for key in ("type", "timestamp", "width", "height", "error"):
+                if key in original:
+                    meta[key] = original[key]
+            chunk["meta"] = meta
+        chunks.append(chunk)
+    return chunks if order == "asc" else list(reversed(chunks))
+
+
+@pytest.mark.asyncio
+async def test_capture_dc_small_frame_passes_through_unchanged():
+    """A non-chunk capture message (small video-frame) reaches on_capture_data verbatim."""
+    t, dc = _make_transport_with_capture_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_capture_data = capture
+
+    frame = {"type": "video-frame", "timestamp": 1234, "data": "tiny"}
+    await dc.handlers["message"](json.dumps(frame))
+
+    assert received == [frame]
+    assert t._pending_capture_frames == {}
+
+
+@pytest.mark.asyncio
+async def test_capture_dc_chunked_frame_reassembled():
+    """A chunked capture frame reassembles into the original frame object."""
+    t, dc = _make_transport_with_capture_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_capture_data = capture
+
+    original = {"type": "video-frame", "timestamp": 7, "data": "x" * 120_000}
+    for chunk in _capture_chunks_for(original, "frame-test-1"):
+        await dc.handlers["message"](json.dumps(chunk))
+
+    assert len(received) == 1
+    assert received[0] == original
+    assert t._pending_capture_frames == {}
+
+
+@pytest.mark.asyncio
+async def test_capture_dc_chunk_reassembly_out_of_order():
+    """Chunks may arrive out of order (capture DC is ordered:false); reassembly still works."""
+    t, dc = _make_transport_with_capture_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_capture_data = capture
+
+    original = {"type": "video-frame", "timestamp": 9, "data": "y" * 120_000}
+    for chunk in _capture_chunks_for(original, "frame-oo", order="desc"):
+        await dc.handlers["message"](json.dumps(chunk))
+
+    assert len(received) == 1
+    assert received[0] == original
+    assert t._pending_capture_frames == {}
+
+
+@pytest.mark.asyncio
+async def test_capture_dc_incomplete_chunk_set_not_forwarded():
+    """An incomplete capture-chunk set must not reach on_capture_data."""
+    t, dc = _make_transport_with_capture_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_capture_data = capture
+
+    original = {"type": "video-frame", "timestamp": 1, "data": "z" * 120_000}
+    full = json.dumps(original)
+    total = (len(full) + _CHUNK_SIZE - 1) // _CHUNK_SIZE
+    assert total > 1
+
+    # Send only the first two fragments of a multi-chunk frame
+    for i in range(min(2, total - 1)):
+        chunk = {
+            "type": "capture-chunk",
+            "frameId": "frame-incomplete",
+            "seq": i,
+            "total": total,
+            "payload": full[i * _CHUNK_SIZE : (i + 1) * _CHUNK_SIZE],
+        }
+        await dc.handlers["message"](json.dumps(chunk))
+
+    assert received == []
+    assert len(t._pending_capture_frames) == 1  # buffered, awaiting remaining fragments
+
+
+@pytest.mark.asyncio
+async def test_capture_dc_malformed_chunk_dropped():
+    """A malformed capture-chunk message is dropped without touching the buffer."""
+    t, dc = _make_transport_with_capture_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_capture_data = capture
+
+    bad = {"type": "capture-chunk", "seq": 0, "total": 2}  # no frameId/payload
+    await dc.handlers["message"](json.dumps(bad))
+
+    assert received == []
+    assert t._pending_capture_frames == {}
+
+
+@pytest.mark.asyncio
+async def test_capture_dc_stale_frames_pruned():
+    """Incomplete frames older than _capture_stale_ms are pruned on the next chunk."""
+    t, dc = _make_transport_with_capture_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_capture_data = capture
+
+    original = {"type": "video-frame", "timestamp": 1, "data": "w" * 120_000}
+    full = json.dumps(original)
+    total = (len(full) + _CHUNK_SIZE - 1) // _CHUNK_SIZE
+
+    # Buffer one incomplete frame
+    await dc.handlers["message"](json.dumps({
+        "type": "capture-chunk",
+        "frameId": "frame-stale",
+        "seq": 0,
+        "total": total,
+        "payload": full[: _CHUNK_SIZE],
+    }))
+    assert len(t._pending_capture_frames) == 1
+
+    # Force every buffered frame to look stale on the next handle call
+    t._capture_stale_ms = -1
+
+    # A chunk for a different frame triggers the prune pass
+    await dc.handlers["message"](json.dumps({
+        "type": "capture-chunk",
+        "frameId": "frame-other",
+        "seq": 0,
+        "total": total,
+        "payload": full[: _CHUNK_SIZE],
+    }))
+
+    assert "frame-stale" not in t._pending_capture_frames
+    assert "frame-other" in t._pending_capture_frames
+    assert received == []

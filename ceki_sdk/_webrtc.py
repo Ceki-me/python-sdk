@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Callable, Coroutine
 
 log = logging.getLogger(__name__)
@@ -126,6 +127,7 @@ class WebRTCTransport:
     ) -> None:
         self._pc: Any = None  # aiortc.RTCPeerConnection
         self._cmd_dc: Any = None  # aiortc.RTCDataChannel
+        self._capture_dc: Any = None  # aiortc.RTCDataChannel (ceki-capture)
 
         # ICE servers: constructor arg → CEKI_TURN_SERVERS env → default STUN
         env_servers_raw = os.environ.get("CEKI_TURN_SERVERS")
@@ -175,6 +177,7 @@ class WebRTCTransport:
         # Callbacks — set by consumer (_client.py)
         self.on_ice_candidate: Callable[[dict[str, Any]], Coroutine[Any, Any, None] | None] | None = None
         self.on_cdp_message: Callable[[dict[str, Any]], Coroutine[Any, Any, None] | None] | None = None
+        self.on_capture_data: Callable[[dict[str, Any]], Coroutine[Any, Any, None] | None] | None = None
         self.on_connection_state: Callable[[str], Coroutine[Any, Any, None] | None] | None = None
         self.on_data_channel_state: Callable[[str], Coroutine[Any, Any, None] | None] | None = None
 
@@ -187,6 +190,15 @@ class WebRTCTransport:
         # sets stay until the session ends (bounded by session lifetime);
         # a lost chunk surfaces as an SDK-side timeout, existing mechanism.
         self._pending_chunks: dict[str, dict[str, Any]] = {}
+
+        # Capture-chunk reassembly buffer for large video-frame/screenshot data
+        # sent over the ceki-capture DC. Keyed by frameId →
+        # {chunks:[slice,...], received, total, received_at}. The capture DC is
+        # created with ordered:false, so fragments can arrive out of order and
+        # can be dropped — incomplete frames are pruned after
+        # ``_capture_stale_ms`` (mirrors extension CaptureChunkReassembler).
+        self._pending_capture_frames: dict[str, dict[str, Any]] = {}
+        self._capture_stale_ms = 5000
 
     async def _ensure_pc(self) -> Any:
         """Lazy-create the RTCPeerConnection on first use."""
@@ -240,8 +252,8 @@ class WebRTCTransport:
                 self._cmd_dc = channel
                 self._wire_cmd_dc(channel)
             elif channel.label == "ceki-capture":
-                # Agent doesn't process capture frames, but log it
-                log.info("webrtc: ceki-capture channel opened (no-op for agent)")
+                self._capture_dc = channel
+                self._wire_capture_dc(channel)
 
         return self._pc
 
@@ -282,6 +294,104 @@ class WebRTCTransport:
 
             if self.on_cdp_message:
                 await self.on_cdp_message(data)
+
+    def _wire_capture_dc(self, channel: Any) -> None:
+        """Set up message/close handlers on the ceki-capture data channel.
+
+        Mirror of ``_wire_cmd_dc`` for the capture channel: small frames
+        (single ``video-frame`` / screenshot messages) are forwarded to
+        ``on_capture_data`` unchanged, while ``capture-chunk`` fragments are
+        reassembled transparently before delivery.
+        """
+
+        @channel.on("open")
+        async def _on_open() -> None:
+            log.info("webrtc: ceki-capture DC opened")
+
+        @channel.on("close")
+        async def _on_close() -> None:
+            log.info("webrtc: ceki-capture DC closed")
+
+        @channel.on("message")
+        async def _on_message(message: str | bytes) -> None:
+            try:
+                data = json.loads(message if isinstance(message, str) else message.decode())
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                log.warning("webrtc: failed to parse capture DC message: %s", exc)
+                return
+
+            # Chunked capture frames (large messages from the extension) are
+            # reassembled transparently here — individual chunks are never
+            # forwarded to on_capture_data.
+            if data.get("type") == "capture-chunk":
+                restored = self._buffer_capture_chunk(data)
+                if restored is None:
+                    return  # not complete yet (or malformed)
+                if self.on_capture_data:
+                    await self.on_capture_data(restored)
+                return
+
+            if self.on_capture_data:
+                await self.on_capture_data(data)
+
+    def _buffer_capture_chunk(self, chunk: dict[str, Any]) -> dict[str, Any] | None:
+        """Buffer one capture-chunk fragment and return the reassembled frame.
+
+        Mirrors the extension's ``CaptureChunkReassembler.handle``: fragments
+        are buffered per ``frameId`` until all ``total`` have arrived (in any
+        order — the capture DC is ordered:false), then the concatenated
+        payload is parsed back into the original frame and returned.
+        Incomplete frames are pruned after ``_capture_stale_ms`` so a dropped
+        fragment cannot leak memory forever.
+        """
+        frame_id = chunk.get("frameId")
+        seq = chunk.get("seq")
+        total = chunk.get("total")
+        payload = chunk.get("payload")
+        if (
+            not isinstance(frame_id, str)
+            or not isinstance(seq, int)
+            or not isinstance(total, int)
+            or seq < 0
+            or total <= 0
+            or seq >= total
+            or not isinstance(payload, str)
+        ):
+            log.warning("webrtc: malformed capture-chunk, dropping")
+            return None
+
+        now = time.monotonic()
+        for fid in [
+            fid
+            for fid, entry in self._pending_capture_frames.items()
+            if now - entry["received_at"] > self._capture_stale_ms
+        ]:
+            log.debug("webrtc: pruning stale capture-chunk frame %s", fid)
+            del self._pending_capture_frames[fid]
+
+        entry = self._pending_capture_frames.get(frame_id)
+        if entry is None:
+            entry = {
+                "chunks": [""] * total,
+                "received": 0,
+                "total": total,
+                "received_at": now,
+            }
+            self._pending_capture_frames[frame_id] = entry
+
+        if entry["chunks"][seq] == "":
+            entry["chunks"][seq] = payload
+            entry["received"] += 1
+
+        if entry["received"] != entry["total"]:
+            return None
+
+        del self._pending_capture_frames[frame_id]
+        try:
+            return json.loads("".join(entry["chunks"]))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            log.warning("webrtc: failed to reassemble capture-chunk frame %s: %s", frame_id, exc)
+            return None
 
     def _buffer_chunk(self, chunk: dict[str, Any]) -> dict[str, Any] | None:
         """Buffer one CDP chunk fragment and return the reassembled message.
@@ -520,6 +630,12 @@ class WebRTCTransport:
             except Exception:
                 pass
             self._cmd_dc = None
+        if self._capture_dc is not None:
+            try:
+                self._capture_dc.close()
+            except Exception:
+                pass
+            self._capture_dc = None
         if self._pc is not None:
             try:
                 await self._pc.close()
@@ -529,4 +645,6 @@ class WebRTCTransport:
         self._dc_open_event.clear()
         self._local_fingerprint = None
         self._pending_remote_candidates.clear()
+        self._pending_chunks.clear()
+        self._pending_capture_frames.clear()
         log.info("webrtc: transport closed")
