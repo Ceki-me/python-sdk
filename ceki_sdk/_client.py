@@ -684,6 +684,17 @@ class Client:
 
             transport.on_cdp_message = _on_cdp
 
+            # Wire capture-data callback → route capture frames to the active
+            # browser. video-frame messages arrive on the ceki-capture DC (the
+            # extension intercepts Page.startScreencast and streams frames via
+            # capture-bridge) rather than as CDP screencastFrame events.
+            async def _on_capture(msg: dict[str, Any]) -> None:
+                browser = self._active_browsers.get(session_id)
+                if browser:
+                    await browser._on_capture_data(msg)
+
+            transport.on_capture_data = _on_capture
+
             # Wire connection state callback for lifecycle monitoring
             async def _on_conn_state(state: str) -> None:
                 log.info("p2p: connection state -> %s", state)
@@ -792,6 +803,15 @@ class Client:
                         await browser._on_cdp_event(msg_inner)
 
             transport.on_cdp_message = _on_cdp
+
+            # Wire capture-data callback → route capture frames to the active
+            # browser (same as _init_p2p — video-frame arrives on ceki-capture DC).
+            async def _on_capture(msg_inner: dict[str, Any]) -> None:
+                browser = self._active_browsers.get(session_id)
+                if browser:
+                    await browser._on_capture_data(msg_inner)
+
+            transport.on_capture_data = _on_capture
 
             # Wire connection state callback
             async def _on_conn_state(state: str) -> None:

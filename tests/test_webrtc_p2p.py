@@ -1029,3 +1029,156 @@ async def test_capture_dc_stale_frames_pruned():
     assert "frame-stale" not in t._pending_capture_frames
     assert "frame-other" in t._pending_capture_frames
     assert received == []
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tests — public screencast API (Browser.on_capture_frame / start_screencast)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _make_browser():
+    from ceki_sdk._browser import Browser
+    from ceki_sdk._models import Match
+
+    client = MagicMock()
+    client._p2p = None
+    client._ws_send = AsyncMock()
+
+    match = MagicMock(spec=Match)
+    match.session_id = "test-session"
+    match.schedule_id = 42
+    match.browser_info = {}
+    match.provider_user_id = 1
+    match.event_id = 999
+    match.chat_topic_id = None
+
+    browser = Browser(client=client, match=match)
+    browser._ended.is_set = MagicMock(return_value=False)
+    return browser, client
+
+
+def test_on_capture_frame_registers_callback():
+    browser, _ = _make_browser()
+
+    async def cb(msg):
+        pass
+
+    browser.on_capture_frame(cb)
+    assert browser._capture_frame_callbacks == [cb]
+
+
+@pytest.mark.asyncio
+async def test_start_screencast_sends_page_start():
+    browser, _ = _make_browser()
+    browser.send = AsyncMock(return_value={})
+
+    result = await browser.start_screencast(maxWidth=1280, maxHeight=720, quality=80)
+
+    browser.send.assert_called_once_with({
+        "method": "Page.startScreencast",
+        "params": {"maxWidth": 1280, "maxHeight": 720, "quality": 80},
+    })
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_start_screencast_no_params_sends_empty():
+    browser, _ = _make_browser()
+    browser.send = AsyncMock(return_value={})
+
+    await browser.start_screencast()
+
+    browser.send.assert_called_once_with({
+        "method": "Page.startScreencast",
+        "params": {},
+    })
+
+
+@pytest.mark.asyncio
+async def test_stop_screencast_sends_page_stop():
+    browser, _ = _make_browser()
+    browser.send = AsyncMock(return_value={})
+
+    await browser.stop_screencast()
+
+    browser.send.assert_called_once_with({"method": "Page.stopScreencast"})
+
+
+@pytest.mark.asyncio
+async def test_capture_data_delivers_video_frame_to_callback():
+    browser, _ = _make_browser()
+    received: list[dict[str, Any]] = []
+
+    async def cb(msg):
+        received.append(msg)
+
+    browser.on_capture_frame(cb)
+
+    frame = {"type": "video-frame", "timestamp": 1, "data": "abc"}
+    await browser._on_capture_data(frame)
+    await asyncio.sleep(0)  # dispatch is fire-and-forget (create_task)
+
+    assert received == [frame]
+
+
+@pytest.mark.asyncio
+async def test_capture_data_ignores_non_video_frame():
+    browser, _ = _make_browser()
+    received: list[dict[str, Any]] = []
+
+    async def cb(msg):
+        received.append(msg)
+
+    browser.on_capture_frame(cb)
+
+    await browser._on_capture_data({"type": "video-stopped"})
+    await browser._on_capture_data({"type": "screenshot", "data": "x"})
+
+    assert received == []
+
+
+@pytest.mark.asyncio
+async def test_init_p2p_wires_on_capture_data_to_browser():
+    """_init_p2p must wire transport.on_capture_data and route frames to the browser."""
+    from ceki_sdk._browser import Browser
+    from ceki_sdk._client import Client
+    from ceki_sdk._models import Match
+
+    with patch("ceki_sdk._client.WebRTCTransport") as mock_cls:
+        transport = MagicMock()
+        transport.create_offer = AsyncMock(return_value="v=0")
+        transport.extract_fingerprint = MagicMock(return_value="fp")
+        transport.wait_dc_open = AsyncMock()
+        mock_cls.return_value = transport
+
+        c = Client(api_key="test", relay_url="ws://localhost:9999",
+                   api_url="https://api.example.com", chat_url="https://chat.example.com")
+        c._ws_send = AsyncMock()
+
+        match = MagicMock(spec=Match)
+        match.session_id = "sess-1"
+        match.schedule_id = 42
+        match.browser_info = {}
+        match.provider_user_id = 1
+        match.event_id = 999
+        match.chat_topic_id = None
+
+        browser = Browser(client=c, match=match)
+        c._active_browsers["sess-1"] = browser
+
+        received: list[dict[str, Any]] = []
+
+        async def cb(msg):
+            received.append(msg)
+
+        browser.on_capture_frame(cb)
+
+        await c._init_p2p("sess-1")
+
+        # transport.on_capture_data must be wired
+        assert transport.on_capture_data is not None
+        # frame delivered to the registered callback (reassembly itself is
+        # covered at the transport level — test_capture_dc_chunked_frame_reassembled)
+        await transport.on_capture_data({"type": "video-frame", "data": "abc"})
+        await asyncio.sleep(0)  # dispatch is fire-and-forget (create_task)
+        assert received == [{"type": "video-frame", "data": "abc"}]
