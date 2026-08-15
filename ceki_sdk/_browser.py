@@ -40,6 +40,7 @@ EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 TabOpenedCallback = Callable[[str], Awaitable[None]]
 SimpleCallback = Callable[[], Awaitable[None]]
 UserEventCallback = Callable[[list[dict[str, Any]]], Awaitable[None]]
+CaptureFrameCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 _ERROR_TERMINAL = {-1011, -1012, -1015, -1018}
 
@@ -98,6 +99,7 @@ class Browser:
         self._provider_disconnected_callbacks: list[SimpleCallback] = []
         self._provider_reconnected_callbacks: list[SimpleCallback] = []
         self._user_event_callbacks: list[UserEventCallback] = []
+        self._capture_frame_callbacks: list[CaptureFrameCallback] = []
         self._ended = asyncio.Event()
         self._ended_reason: str | None = None
 
@@ -253,6 +255,39 @@ class Browser:
 
     def on_user_event(self, callback: UserEventCallback) -> None:
         self._user_event_callbacks.append(callback)
+
+    def on_capture_frame(self, callback: CaptureFrameCallback) -> None:
+        """Register a callback that receives screencast video frames.
+
+        Frames arrive on the P2P ``ceki-capture`` data channel — the extension
+        intercepts ``Page.startScreencast`` and streams frames there via its
+        capture bridge instead of emitting CDP ``Page.screencastFrame`` events.
+        Each callback is invoked with the raw capture frame dict::
+
+            {"type": "video-frame", "data": "<base64 jpeg>",
+             "width": ..., "height": ..., "timestamp": ...}
+
+        Frames that exceed the chunk threshold arrive as ``capture-chunk``
+        fragments and are reassembled transparently before delivery.
+        """
+        self._capture_frame_callbacks.append(callback)
+
+    async def start_screencast(self, **params: Any) -> dict[str, Any]:
+        """Start streaming video frames to :meth:`on_capture_frame` callbacks.
+
+        Sends ``Page.startScreencast`` (intercepted by the extension and served
+        by its capture bridge). Supported params mirror CDP::
+
+            maxWidth, maxHeight, quality, everyNthFrame, maxFrameRate
+
+        Frames arrive asynchronously on the capture data channel and are
+        delivered to every registered callback.
+        """
+        return await self.send({"method": "Page.startScreencast", "params": params})
+
+    async def stop_screencast(self) -> dict[str, Any]:
+        """Stop the screencast stream (sends ``Page.stopScreencast``)."""
+        return await self.send({"method": "Page.stopScreencast"})
 
     async def switch_tab(self) -> None:
         await self._client._ws_send({"type": "switch_tab", "session_id": self.session_id})
@@ -943,6 +978,18 @@ class Browser:
         params = msg.get("params", {})
         for cb in self._event_callbacks:
             asyncio.create_task(cast(Coroutine, cb(method, params)))
+
+    async def _on_capture_data(self, msg: dict[str, Any]) -> None:
+        """Dispatch a capture-DC message to :meth:`on_capture_frame` callbacks.
+
+        Only ``video-frame`` messages are forwarded — ``video-stopped`` and
+        screenshot messages that also travel on the capture DC are not frames
+        and are ignored by the screencast API.
+        """
+        if msg.get("type") != "video-frame":
+            return
+        for cb in self._capture_frame_callbacks:
+            asyncio.create_task(cast(Coroutine, cb(msg)))
 
     async def _on_tab_opened(self, msg: dict[str, Any]) -> None:
         url = msg.get("url", "")

@@ -837,3 +837,348 @@ async def test_dc_malformed_chunk_dropped():
 
     assert received == []
     assert t._pending_chunks == {}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tests — capture-chunk reassembly on the ceki-capture DC
+# ──────────────────────────────────────────────────────────────────────────────
+
+_CHUNK_SIZE = 48000  # mirror the extension's sendCaptureChunked constant
+
+
+def _make_transport_with_capture_message_handler():
+    from ceki_sdk._webrtc import WebRTCTransport
+
+    t = WebRTCTransport()
+    dc = _RecordingDC()
+    t._wire_capture_dc(dc)
+    return t, dc
+
+
+def _capture_chunks_for(
+    original: dict[str, Any],
+    frame_id: str,
+    order: str = "asc",
+) -> list[dict[str, Any]]:
+    """Split a capture frame the way the extension's sendCaptureChunked does."""
+    full = json.dumps(original)
+    total = (len(full) + _CHUNK_SIZE - 1) // _CHUNK_SIZE
+    chunks: list[dict[str, Any]] = []
+    for i in range(total):
+        chunk: dict[str, Any] = {
+            "type": "capture-chunk",
+            "frameId": frame_id,
+            "seq": i,
+            "total": total,
+            "payload": full[i * _CHUNK_SIZE : (i + 1) * _CHUNK_SIZE],
+        }
+        if i == 0:
+            meta: dict[str, Any] = {}
+            for key in ("type", "timestamp", "width", "height", "error"):
+                if key in original:
+                    meta[key] = original[key]
+            chunk["meta"] = meta
+        chunks.append(chunk)
+    return chunks if order == "asc" else list(reversed(chunks))
+
+
+@pytest.mark.asyncio
+async def test_capture_dc_small_frame_passes_through_unchanged():
+    """A non-chunk capture message (small video-frame) reaches on_capture_data verbatim."""
+    t, dc = _make_transport_with_capture_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_capture_data = capture
+
+    frame = {"type": "video-frame", "timestamp": 1234, "data": "tiny"}
+    await dc.handlers["message"](json.dumps(frame))
+
+    assert received == [frame]
+    assert t._pending_capture_frames == {}
+
+
+@pytest.mark.asyncio
+async def test_capture_dc_chunked_frame_reassembled():
+    """A chunked capture frame reassembles into the original frame object."""
+    t, dc = _make_transport_with_capture_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_capture_data = capture
+
+    original = {"type": "video-frame", "timestamp": 7, "data": "x" * 120_000}
+    for chunk in _capture_chunks_for(original, "frame-test-1"):
+        await dc.handlers["message"](json.dumps(chunk))
+
+    assert len(received) == 1
+    assert received[0] == original
+    assert t._pending_capture_frames == {}
+
+
+@pytest.mark.asyncio
+async def test_capture_dc_chunk_reassembly_out_of_order():
+    """Chunks may arrive out of order (capture DC is ordered:false); reassembly still works."""
+    t, dc = _make_transport_with_capture_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_capture_data = capture
+
+    original = {"type": "video-frame", "timestamp": 9, "data": "y" * 120_000}
+    for chunk in _capture_chunks_for(original, "frame-oo", order="desc"):
+        await dc.handlers["message"](json.dumps(chunk))
+
+    assert len(received) == 1
+    assert received[0] == original
+    assert t._pending_capture_frames == {}
+
+
+@pytest.mark.asyncio
+async def test_capture_dc_incomplete_chunk_set_not_forwarded():
+    """An incomplete capture-chunk set must not reach on_capture_data."""
+    t, dc = _make_transport_with_capture_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_capture_data = capture
+
+    original = {"type": "video-frame", "timestamp": 1, "data": "z" * 120_000}
+    full = json.dumps(original)
+    total = (len(full) + _CHUNK_SIZE - 1) // _CHUNK_SIZE
+    assert total > 1
+
+    # Send only the first two fragments of a multi-chunk frame
+    for i in range(min(2, total - 1)):
+        chunk = {
+            "type": "capture-chunk",
+            "frameId": "frame-incomplete",
+            "seq": i,
+            "total": total,
+            "payload": full[i * _CHUNK_SIZE : (i + 1) * _CHUNK_SIZE],
+        }
+        await dc.handlers["message"](json.dumps(chunk))
+
+    assert received == []
+    assert len(t._pending_capture_frames) == 1  # buffered, awaiting remaining fragments
+
+
+@pytest.mark.asyncio
+async def test_capture_dc_malformed_chunk_dropped():
+    """A malformed capture-chunk message is dropped without touching the buffer."""
+    t, dc = _make_transport_with_capture_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_capture_data = capture
+
+    bad = {"type": "capture-chunk", "seq": 0, "total": 2}  # no frameId/payload
+    await dc.handlers["message"](json.dumps(bad))
+
+    assert received == []
+    assert t._pending_capture_frames == {}
+
+
+@pytest.mark.asyncio
+async def test_capture_dc_stale_frames_pruned():
+    """Incomplete frames older than _capture_stale_ms are pruned on the next chunk."""
+    t, dc = _make_transport_with_capture_message_handler()
+    received: list[dict[str, Any]] = []
+
+    async def capture(msg: dict[str, Any]) -> None:
+        received.append(msg)
+
+    t.on_capture_data = capture
+
+    original = {"type": "video-frame", "timestamp": 1, "data": "w" * 120_000}
+    full = json.dumps(original)
+    total = (len(full) + _CHUNK_SIZE - 1) // _CHUNK_SIZE
+
+    # Buffer one incomplete frame
+    await dc.handlers["message"](json.dumps({
+        "type": "capture-chunk",
+        "frameId": "frame-stale",
+        "seq": 0,
+        "total": total,
+        "payload": full[: _CHUNK_SIZE],
+    }))
+    assert len(t._pending_capture_frames) == 1
+
+    # Force every buffered frame to look stale on the next handle call
+    t._capture_stale_ms = -1
+
+    # A chunk for a different frame triggers the prune pass
+    await dc.handlers["message"](json.dumps({
+        "type": "capture-chunk",
+        "frameId": "frame-other",
+        "seq": 0,
+        "total": total,
+        "payload": full[: _CHUNK_SIZE],
+    }))
+
+    assert "frame-stale" not in t._pending_capture_frames
+    assert "frame-other" in t._pending_capture_frames
+    assert received == []
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tests — public screencast API (Browser.on_capture_frame / start_screencast)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _make_browser():
+    from ceki_sdk._browser import Browser
+    from ceki_sdk._models import Match
+
+    client = MagicMock()
+    client._p2p = None
+    client._ws_send = AsyncMock()
+
+    match = MagicMock(spec=Match)
+    match.session_id = "test-session"
+    match.schedule_id = 42
+    match.browser_info = {}
+    match.provider_user_id = 1
+    match.event_id = 999
+    match.chat_topic_id = None
+
+    browser = Browser(client=client, match=match)
+    browser._ended.is_set = MagicMock(return_value=False)
+    return browser, client
+
+
+def test_on_capture_frame_registers_callback():
+    browser, _ = _make_browser()
+
+    async def cb(msg):
+        pass
+
+    browser.on_capture_frame(cb)
+    assert browser._capture_frame_callbacks == [cb]
+
+
+@pytest.mark.asyncio
+async def test_start_screencast_sends_page_start():
+    browser, _ = _make_browser()
+    browser.send = AsyncMock(return_value={})
+
+    result = await browser.start_screencast(maxWidth=1280, maxHeight=720, quality=80)
+
+    browser.send.assert_called_once_with({
+        "method": "Page.startScreencast",
+        "params": {"maxWidth": 1280, "maxHeight": 720, "quality": 80},
+    })
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_start_screencast_no_params_sends_empty():
+    browser, _ = _make_browser()
+    browser.send = AsyncMock(return_value={})
+
+    await browser.start_screencast()
+
+    browser.send.assert_called_once_with({
+        "method": "Page.startScreencast",
+        "params": {},
+    })
+
+
+@pytest.mark.asyncio
+async def test_stop_screencast_sends_page_stop():
+    browser, _ = _make_browser()
+    browser.send = AsyncMock(return_value={})
+
+    await browser.stop_screencast()
+
+    browser.send.assert_called_once_with({"method": "Page.stopScreencast"})
+
+
+@pytest.mark.asyncio
+async def test_capture_data_delivers_video_frame_to_callback():
+    browser, _ = _make_browser()
+    received: list[dict[str, Any]] = []
+
+    async def cb(msg):
+        received.append(msg)
+
+    browser.on_capture_frame(cb)
+
+    frame = {"type": "video-frame", "timestamp": 1, "data": "abc"}
+    await browser._on_capture_data(frame)
+    await asyncio.sleep(0)  # dispatch is fire-and-forget (create_task)
+
+    assert received == [frame]
+
+
+@pytest.mark.asyncio
+async def test_capture_data_ignores_non_video_frame():
+    browser, _ = _make_browser()
+    received: list[dict[str, Any]] = []
+
+    async def cb(msg):
+        received.append(msg)
+
+    browser.on_capture_frame(cb)
+
+    await browser._on_capture_data({"type": "video-stopped"})
+    await browser._on_capture_data({"type": "screenshot", "data": "x"})
+
+    assert received == []
+
+
+@pytest.mark.asyncio
+async def test_init_p2p_wires_on_capture_data_to_browser():
+    """_init_p2p must wire transport.on_capture_data and route frames to the browser."""
+    from ceki_sdk._browser import Browser
+    from ceki_sdk._client import Client
+    from ceki_sdk._models import Match
+
+    with patch("ceki_sdk._client.WebRTCTransport") as mock_cls:
+        transport = MagicMock()
+        transport.create_offer = AsyncMock(return_value="v=0")
+        transport.extract_fingerprint = MagicMock(return_value="fp")
+        transport.wait_dc_open = AsyncMock()
+        mock_cls.return_value = transport
+
+        c = Client(api_key="test", relay_url="ws://localhost:9999",
+                   api_url="https://api.example.com", chat_url="https://chat.example.com")
+        c._ws_send = AsyncMock()
+
+        match = MagicMock(spec=Match)
+        match.session_id = "sess-1"
+        match.schedule_id = 42
+        match.browser_info = {}
+        match.provider_user_id = 1
+        match.event_id = 999
+        match.chat_topic_id = None
+
+        browser = Browser(client=c, match=match)
+        c._active_browsers["sess-1"] = browser
+
+        received: list[dict[str, Any]] = []
+
+        async def cb(msg):
+            received.append(msg)
+
+        browser.on_capture_frame(cb)
+
+        await c._init_p2p("sess-1")
+
+        # transport.on_capture_data must be wired
+        assert transport.on_capture_data is not None
+        # frame delivered to the registered callback (reassembly itself is
+        # covered at the transport level — test_capture_dc_chunked_frame_reassembled)
+        await transport.on_capture_data({"type": "video-frame", "data": "abc"})
+        await asyncio.sleep(0)  # dispatch is fire-and-forget (create_task)
+        assert received == [{"type": "video-frame", "data": "abc"}]
