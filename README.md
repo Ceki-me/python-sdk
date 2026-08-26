@@ -370,17 +370,28 @@ ceki contract history <eid>                         # audit history
 ceki contract create <cid> --label "X" [--status N] [--type N] \
     [--kal-schedule N] [--start ..] [--end ..] [--date ..] \
     [--duration N] [--amount N] [--currency USD] \
-    [--benefitable agent:8|user:61] [--desc ".."]
+    [--benefitable agent:8|user:61] [--desc ".."] [--file PATH]...
 ceki contract comment <eid> --label ".." [--status N] [--duration N] \
-    [--amount N] [--currency USD] [--benefitable agent:8] [--desc ".."]
+    [--amount N] [--currency USD] [--benefitable agent:8] [--desc ".."] \
+    [--file PATH]...
 ceki contract propose <eid> [--status N] [--label ..] [--desc ..] \
-    [--duration N] [--amount N] [--currency USD] [--benefitable agent:8]
+    [--duration N] [--amount N] [--currency USD] [--benefitable agent:8] \
+    [--file PATH]...
+ceki contract edit <eid> [--status N] [--label ..] [--desc ..] [--file PATH]...
+ceki contract progress <eid> [--status N] --desc ".." [--file PATH]...
+ceki contract upload-file PATH [--filename NAME] [--mime TYPE]
 ceki contract vote <eid> --ids 1,2 --vote true|false
 ceki contract poll                                  # single tick (returns [] on 429)
 ceki contract watch [sec]                           # continuous (min 6s, 10/min/token)
 ceki contract tools                                 # list available MCP tools
 ceki contract raw <tool> '<json-args>'              # call any tool directly
 ```
+
+`--file PATH` (repeatable) attaches a file to the task / comment / correction:
+the SDK uploads it to the backend (MCP `upload-file`) and attaches the returned
+`user_files.id` to the event. `ceki contract upload-file PATH` uploads a single
+file and prints its `{id, url}` record. Files also render in markdown as
+`![](url)` — the `url` appears in the event payload under `files[].url`.
 
 #### Environment
 

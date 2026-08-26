@@ -993,6 +993,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     qa=args.qa,
                     participants=extra_parts or None,
                     tags=tags,
+                    files=args.file or None,
                 ))
             elif action == "comment":
                 # `--label` → label (short header), `--desc` → description
@@ -1023,6 +1024,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     amount=args.amount,
                     currency=args.currency,
                     benefitable=args.benefitable,
+                    files=args.file or None,
                 ))
             elif action == "propose":
                 tags = _parse_tags(args.tags) if getattr(args, "tags", None) else None
@@ -1041,6 +1043,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     amount=args.amount,
                     currency=args.currency,
                     benefitable=args.benefitable,
+                    files=args.file or None,
                     settings=settings,
                 ))
             elif action == "edit":
@@ -1060,6 +1063,7 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     amount=args.amount,
                     currency=args.currency,
                     benefitable=args.benefitable,
+                    files=args.file or None,
                     settings=settings,
                 ))
             elif action == "progress":
@@ -1067,6 +1071,13 @@ def _cmd_contract(args: argparse.Namespace) -> int:
                     args.eid,
                     status=args.status,
                     desc=args.desc,
+                    files=args.file or None,
+                ))
+            elif action == "upload-file":
+                _contract_dump(cli.upload_file(
+                    args.path,
+                    filename=args.filename,
+                    mime=args.mime,
                 ))
             elif action == "vote":
                 ids = [int(s) for s in str(args.ids).split(",") if s.strip()]
@@ -1412,6 +1423,16 @@ def build_parser() -> argparse.ArgumentParser:
             "'backend:Backend:#ff0000'."
         ),
     )
+    p_cc.add_argument(
+        "--file",
+        action="append",
+        default=[],
+        dest="file",
+        help=(
+            "Repeatable. Local file path to attach to the task "
+            "(uploaded to the backend first)."
+        ),
+    )
 
     p_cco = csub.add_parser("comment", help="Post comment on event")
     p_cco.add_argument("eid", type=int)
@@ -1426,6 +1447,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_cco.add_argument("--currency")
     p_cco.add_argument("--benefitable")
     p_cco.add_argument("--desc")
+    p_cco.add_argument(
+        "--file",
+        action="append",
+        default=[],
+        dest="file",
+        help=(
+            "Repeatable. Local file path to attach to the comment "
+            "(uploaded to the backend first)."
+        ),
+    )
 
     p_cp = csub.add_parser("propose", help="Propose correction")
     p_cp.add_argument("eid", type=int)
@@ -1445,6 +1476,16 @@ def build_parser() -> argparse.ArgumentParser:
             "Project tags (sugar for settings.tags[]). Comma-separated, each "
             "item key[:label[:color]]. E.g. 'backend,urgent' or "
             "'backend:Backend:#ff0000'. back/2796 persists onto the event."
+        ),
+    )
+    p_cp.add_argument(
+        "--file",
+        action="append",
+        default=[],
+        dest="file",
+        help=(
+            "Repeatable. Local file path to attach in the correction "
+            "(uploaded to the backend first)."
         ),
     )
 
@@ -1468,6 +1509,16 @@ def build_parser() -> argparse.ArgumentParser:
             "'backend:Backend:#ff0000'."
         ),
     )
+    p_edit.add_argument(
+        "--file",
+        action="append",
+        default=[],
+        dest="file",
+        help=(
+            "Repeatable. Local file path to attach in the edit/correction "
+            "(uploaded to the backend first)."
+        ),
+    )
 
     p_cpr = csub.add_parser(
         "progress",
@@ -1476,11 +1527,29 @@ def build_parser() -> argparse.ArgumentParser:
     p_cpr.add_argument("eid", type=int)
     p_cpr.add_argument("--status", type=int)
     p_cpr.add_argument("--desc", required=True)
+    p_cpr.add_argument(
+        "--file",
+        action="append",
+        default=[],
+        dest="file",
+        help=(
+            "Repeatable. Local file path to attach to the progress comment "
+            "(uploaded to the backend first)."
+        ),
+    )
 
     p_cv = csub.add_parser("vote", help="Vote on correction(s)")
     p_cv.add_argument("eid", type=int)
     p_cv.add_argument("--ids", required=True, help="Comma-separated correction IDs")
     p_cv.add_argument("--vote", required=True, help="true|false")
+
+    p_cuf = csub.add_parser(
+        "upload-file",
+        help="Upload a file, print the user_files record (id/url)",
+    )
+    p_cuf.add_argument("path", help="Local file path to upload")
+    p_cuf.add_argument("--filename", help="Override filename (default: basename)")
+    p_cuf.add_argument("--mime", help="Override MIME type (default: guessed)")
 
     csub.add_parser("poll", help="Single agent polling tick")
 
