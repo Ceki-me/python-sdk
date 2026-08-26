@@ -280,6 +280,109 @@ def test_vote_payload_shape():
     assert body["params"]["arguments"] == {"event_id": 7, "ids": [1, 2], "vote": True}
 
 
+# ── files / upload ───────────────────────────────────────────────
+
+
+def test_upload_file_base64_and_defaults():
+    http, _ = _http_mock(_mcp_text({"id": 42, "name": "report.pdf", "url": "//x/f", "size": 7, "disk": "upload"}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    res = c.upload_file(b"content", filename="report.pdf")
+    body = _captured_body(http)
+    assert body["params"]["name"] == "upload-file"
+    assert body["params"]["arguments"] == {
+        "file_data": "Y29udGVudA==",
+        "file_name": "report.pdf",
+        "mime_type": "application/pdf",
+    }
+    assert res["id"] == 42
+
+
+def test_upload_file_path_reads_disk_and_mime():
+    import base64 as _b64
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        tmp.write(b"\x89PNG\r\n\x1a\nx")
+        p = tmp.name
+    try:
+        http, _ = _http_mock(_mcp_text({"id": 7, "url": "//x/i"}))
+        c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+        c.upload_file(p)
+        args = _captured_body(http)["params"]["arguments"]
+        assert args["file_name"].endswith(".png")
+        assert args["file_data"] == _b64.b64encode(b"\x89PNG\r\n\x1a\nx").decode()
+    finally:
+        import os
+        os.unlink(p)
+
+
+def test_upload_file_no_id_raises():
+    http, _ = _http_mock(_mcp_text({"url": "//x"}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    try:
+        c.upload_file(b"x", filename="a.bin")
+    except ContractError as e:
+        assert "no id" in str(e)
+    else:
+        raise AssertionError("expected ContractError")
+
+
+def test_create_files_ints_forwarded():
+    http, _ = _http_mock(_mcp_text({"id": 1}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.create(14, label="hello", files=[11, 22])
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["files"] == [11, 22]
+
+
+def test_create_files_paths_uploaded_then_attached():
+    """Local paths are uploaded via upload-file, then attached as ids."""
+    import base64 as _b64
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tmp:
+        tmp.write(b"hi")
+        p = tmp.name
+    try:
+        # First call → upload-file returns id=500; second call → create.
+        http, resp = _http_mock(_mcp_text({"id": 500, "url": "//x/f"}))
+        c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+        c.create(14, label="hello", files=[p])
+        calls = http.post.call_args_list
+        assert len(calls) == 2
+        first = calls[0].kwargs["json"]["params"]
+        assert first["name"] == "upload-file"
+        assert first["arguments"]["file_data"] == _b64.b64encode(b"hi").decode()
+        second = calls[1].kwargs["json"]["params"]
+        assert second["name"] == "create-contract-event"
+        assert second["arguments"]["files"] == [500]
+    finally:
+        import os
+        os.unlink(p)
+
+
+def test_comment_files_forwarded():
+    http, _ = _http_mock(_mcp_text({"id": 99}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.comment(99, label="done", files=[3])
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["files"] == [3]
+
+
+def test_propose_files_forwarded():
+    http, _ = _http_mock(_mcp_text({"id": 7}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.propose(7, status_id=200, label="L", files=[4, 5])
+    args = _captured_body(http)["params"]["arguments"]
+    assert args["files"] == [4, 5]
+
+
+def test_no_files_key_when_empty():
+    http, _ = _http_mock(_mcp_text({"id": 1}))
+    c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
+    c.create(14, label="hello")
+    args = _captured_body(http)["params"]["arguments"]
+    assert "files" not in args
+
+
 def test_history_tool_name():
     http, _ = _http_mock(_mcp_text([]))
     c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
@@ -767,7 +870,7 @@ def test_progress_calls_propose_then_comment(monkeypatch):
     assert calls[0][1] == (99,)
     assert calls[0][2] == {"status_id": 222}
     assert calls[1][1] == (99,)
-    assert calls[1][2] == {"label": "r"}
+    assert calls[1][2] == {"label": "r", "files": None}
     assert "description" not in calls[1][2]
     assert result == {
         "status_correction": {"applied": True, "id": 1},
@@ -795,7 +898,7 @@ def test_progress_without_status_only_comments(monkeypatch):
     result = c.progress(99, desc="just an update")
 
     assert propose_calls == []
-    assert comment_calls == [(99, {"label": "just an update"})]
+    assert comment_calls == [(99, {"label": "just an update", "files": None})]
     assert "description" not in comment_calls[0][1]
     assert result == {"status_correction": None, "comment": {"id": 7}}
 
@@ -910,7 +1013,7 @@ def test_cli_dispatch_progress(monkeypatch, capsys):
         def __exit__(self, *a):
             return False
 
-        def progress(self, eid, *, status, desc):
+        def progress(self, eid, *, status, desc, files=None):
             captured["eid"] = eid
             captured["status"] = status
             captured["desc"] = desc
@@ -924,6 +1027,68 @@ def test_cli_dispatch_progress(monkeypatch, capsys):
 
     assert rc == 0
     assert captured == {"eid": 99, "status": 222, "desc": "x"}
+
+
+def test_cli_dispatch_create_forwards_files(monkeypatch, capsys):
+    """`ceki contract create CID --label x --file a.png` passes files to create()."""
+    from ceki_sdk import cli as cli_module
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def create(self, cid, **kw):
+            captured["cid"] = cid
+            captured["files"] = kw.get("files")
+            return {"id": 1}
+
+    monkeypatch.setattr(cli_module, "_contract_client", lambda: FakeClient())
+
+    parser = cli_module.build_parser()
+    args = parser.parse_args(
+        ["contract", "create", "14", "--label", "x", "--file", "a.png", "--file", "b.pdf"]
+    )
+    rc = cli_module._cmd_contract(args)
+
+    assert rc == 0
+    assert captured == {"cid": 14, "files": ["a.png", "b.pdf"]}
+
+
+def test_cli_dispatch_upload_file(monkeypatch, capsys):
+    """`ceki contract upload-file PATH` calls client.upload_file and dumps the record."""
+    from ceki_sdk import cli as cli_module
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def upload_file(self, path, **kw):
+            captured["path"] = path
+            captured["kw"] = kw
+            return {"id": 9, "url": "//x/f", "name": "report.pdf"}
+
+    monkeypatch.setattr(cli_module, "_contract_client", lambda: FakeClient())
+
+    parser = cli_module.build_parser()
+    args = parser.parse_args(
+        ["contract", "upload-file", "/tmp/report.pdf", "--filename", "r.pdf"]
+    )
+    rc = cli_module._cmd_contract(args)
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert captured == {"path": "/tmp/report.pdf", "kw": {"filename": "r.pdf", "mime": None}}
+    assert '"id": 9' in out
 
 
 # ── call-human (task 4019) ────────────────────────────────────────

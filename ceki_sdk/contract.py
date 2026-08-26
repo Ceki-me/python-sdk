@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -424,6 +427,7 @@ class ContractClient:
         qa: str | None = None,
         participants: list[dict[str, Any]] | None = None,
         tags: list[dict[str, Any]] | None = None,
+        files: list[int | str | Path] | None = None,
     ) -> Any:
         # back/2542: reviewer/qa now live inside users[] (renamed from
         # participants[]). Element shape unchanged. The `participants`
@@ -439,6 +443,7 @@ class ContractClient:
         if participants:
             users.extend(participants)
 
+        files_resolved = self._resolve_files(files)
         args = _clean({
             "contract_id": int(contract_id),
             "label": label,
@@ -456,6 +461,7 @@ class ContractClient:
             "data": data,
             "benefitable": _benefitable(benefitable),
             "users": users if users else None,
+            "files": files_resolved,
             # back/3165: project tags live in events.settings.tags[]. `tags`
             # is CLI/SDK sugar — a bare list of {key,label?,color?} dicts —
             # emitted on the wire under the `settings` blob the backend expects.
@@ -478,6 +484,7 @@ class ContractClient:
         amount: int | None = None,
         currency: str | None = None,
         benefitable: str | None = None,
+        files: list[int | str | Path] | None = None,
     ) -> Any:
         """Post a comment event.
 
@@ -487,8 +494,12 @@ class ContractClient:
         at a word boundary – the first part goes to `label`, the remainder
         to `description`. This matches backend API behavior and keeps
         the UI clean without visible duplication.
+
+        `files` attaches user_files to the comment: pass user_files ids
+        (int) or local paths (str/Path) which are uploaded first.
         """
         label_out, desc_out = _split_label_desc(label, description)
+        files_resolved = self._resolve_files(files)
         args = _clean({
             "event_id": int(event_id),
             "label": label_out,
@@ -502,6 +513,7 @@ class ContractClient:
             "amount": amount,
             "currency": currency,
             "benefitable": _benefitable(benefitable),
+            "files": files_resolved,
         })
         return self.call(_TOOL_MAP["comment"], args)
 
@@ -519,9 +531,11 @@ class ContractClient:
         amount: int | None = None,
         currency: str | None = None,
         benefitable: str | None = None,
+        files: list[int | str | Path] | None = None,
         settings: dict[str, Any] | None = None,
     ) -> Any:
         label_out, desc_out = _split_label_desc(label, description)
+        files_resolved = self._resolve_files(files)
         args = _clean({
             "event_id": int(event_id),
             "status_id": status_id,
@@ -534,6 +548,7 @@ class ContractClient:
             "amount": amount,
             "currency": currency,
             "benefitable": _benefitable(benefitable),
+            "files": files_resolved,
             # back/2796: ProposeCorrectionTool persists settings (tags,
             # reply_to, blocked_by, do_after) onto the event. Forwarded
             # verbatim — only attached when the caller supplies it.
@@ -547,6 +562,7 @@ class ContractClient:
         *,
         status: int | None = None,
         desc: str,
+        files: list[int | str | Path] | None = None,
     ) -> dict[str, Any]:
         """Status correction (optional) + progress comment in one shot.
 
@@ -554,6 +570,9 @@ class ContractClient:
         body of a child comment-event, not a label/description overwrite
         on the parent event. Use this for Hand/QA/Reviewer progress
         reports — `propose --desc` would clobber the parent spec.
+
+        `files` attaches user_files to the progress comment (ids or local
+        paths — paths are uploaded first).
         """
         status_result: Any = None
         if status is not None:
@@ -567,7 +586,7 @@ class ContractClient:
         # `description` is never set on a comment (the UI renders both,
         # which would duplicate the body for SDK-posted comments).
         label = desc if (desc or "").strip() else "progress"
-        comment_result = self.comment(event_id, label=label)
+        comment_result = self.comment(event_id, label=label, files=files)
         return {"status_correction": status_result, "comment": comment_result}
 
     def vote(self, event_id: int, ids: list[int], vote: bool) -> Any:
@@ -576,6 +595,86 @@ class ContractClient:
             "ids": [int(i) for i in ids],
             "vote": bool(vote),
         })
+
+    # ── files ────────────────────────────────────────────────────
+
+    def upload_file(
+        self,
+        file: bytes | str | Path,
+        *,
+        filename: str | None = None,
+        mime: str | None = None,
+    ) -> dict[str, Any]:
+        """Upload a file to the backend, returning its ``user_files`` record.
+
+        Wraps the MCP ``upload-file`` tool (base64 over JSON-RPC). The
+        returned ``id`` is what create()/comment()/propose() expect in
+        their ``files`` param (backend: ``user_files.id``).
+
+        Args:
+            file: Local path OR raw bytes. Paths are read from disk.
+            filename: Original filename with extension (defaults to the
+                basename of a path, or a mime-derived name for raw bytes).
+            mime: MIME type (e.g. image/png, application/pdf). Auto-guessed
+                from the filename extension when omitted; the backend sniffs
+                magic bytes as a final fallback.
+
+        Returns:
+            Dict shaped ``{"id", "name", "url", "size", "disk"}``.
+        """
+        if isinstance(file, (str, Path)):
+            path = Path(file)
+            data = path.read_bytes()
+            if filename is None:
+                filename = path.name
+        else:
+            data = bytes(file)
+            if filename is None:
+                filename = self._default_filename(mime)
+
+        if not filename:
+            raise ValueError("upload_file: could not derive a filename")
+
+        if mime is None:
+            guessed, _ = mimetypes.guess_type(filename)
+            mime = guessed
+
+        b64 = base64.b64encode(data).decode()
+        result = self.call("upload-file", {
+            "file_data": b64,
+            "file_name": filename,
+            "mime_type": mime,
+        })
+        if not isinstance(result, dict) or not result.get("id"):
+            raise ContractError(f"upload-file returned no id: {result!r}")
+        return result
+
+    def _resolve_files(
+        self, files: list[int | str | Path] | None
+    ) -> list[int] | None:
+        """Map a files[] arg to user_files ids.
+
+        Ints pass through (already-uploaded ids); str/Path are uploaded
+        via upload_file() first and replaced with the returned id.
+        """
+        if not files:
+            return None
+        ids: list[int] = []
+        for f in files:
+            if isinstance(f, int):
+                ids.append(int(f))
+                continue
+            up = self.upload_file(f)
+            fid = up.get("id")
+            if not fid:
+                raise ContractError(f"upload-file returned no id for {f!r}")
+            ids.append(int(fid))
+        return ids
+
+    @staticmethod
+    def _default_filename(mime: str | None) -> str:
+        ext = (mimetypes.guess_extension(mime or "") or ".bin").lstrip(".")
+        return f"file.{ext or 'bin'}"
 
     # ── polling (REST, not MCP) ───────────────────────────────────
 
