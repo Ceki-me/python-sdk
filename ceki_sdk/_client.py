@@ -492,8 +492,14 @@ class Client:
         if mtype == "cdp_response":
             session_id = msg.get("session_id", "")
             browser = self._active_browsers.get(session_id)
-            log.debug("WS cdp_response: sid=%s browser=%s active=%s msg_id=%s ok=%s",
-                       session_id, bool(browser), list(self._active_browsers.keys()), msg.get("id"), msg.get("ok"))
+            log.debug(
+                "WS cdp_response: sid=%s browser=%s active=%s msg_id=%s ok=%s",
+                session_id,
+                bool(browser),
+                list(self._active_browsers.keys()),
+                msg.get("id"),
+                msg.get("ok"),
+            )
             if browser:
                 await browser._on_cdp_response(msg)
             return
