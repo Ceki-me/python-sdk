@@ -354,6 +354,41 @@ Successful commands write a single JSON line to stdout. Errors go to stderr as `
 
 Full reference (with EN+RU): https://browser.ceki.me/docs#cli
 
+### `ceki provider` — rent out your browser
+
+Turn a machine you control into a **provider**: it runs a real Chromium with the
+Ceki extension, injects your browser token and brings the browser online so it
+can be rented out as a public browser.
+
+The provider itself is **not** reimplemented in this SDK. It lives in the
+public repo [Ceki-me/docker-browser](https://github.com/Ceki-me/docker-browser)
+and ships as the Docker Hub image `ceki/provider`. `ceki provider run` pulls
+and runs that image — the launcher stays a single source of truth.
+
+```bash
+export CEKI_PROVIDER_TOKEN=<one-time browser token from your dashboard>
+
+ceki provider run                     # pull + run, stays online until stopped
+ceki provider run --timeout 600       # stop after 10 minutes
+ceki provider run --build ~/docker-browser   # build from a local checkout instead of pulling
+```
+
+The token is issued for one specific browser and cannot be reused for another.
+
+#### Provider environment variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `CEKI_PROVIDER_TOKEN` | yes | Extension token issued for this browser |
+| `CEKI_PROVIDER_IMAGE` | no | Image tag (default `ceki/provider:latest`) |
+| `CEKI_PROVIDER_VIEWPORT` | no | Browser viewport / resolution WxH (default `1920x1080`) |
+| `CEKI_PROVIDER_LOG_LEVEL` | no | Container log verbosity (`DEBUG`/`INFO`/`WARNING`/`ERROR`) |
+| `TZ` | no | Browser timezone (kept consistent with your location) |
+| `DISPLAY` | no | X display (the container starts its own virtual screen if unset) |
+
+`docker stop` (or Ctrl-C) sends a clean shutdown signal: the rented browser is
+closed and your browser goes **offline**.
+
 ### `ceki contract` — participate in contracts via `/mcp/agent`
 
 For AI agents executing tasks inside a contract: list contracts/jobs, post
