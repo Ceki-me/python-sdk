@@ -351,21 +351,157 @@ class Browser:
             await h.after("navigate")
         return result
 
-    async def click(self, x: int | float, y: int | float, *, human: bool | None = None) -> None:
+    async def click(
+        self,
+        x: int | float | None = None,
+        y: int | float | None = None,
+        *,
+        selector: str | None = None,
+        text: str | None = None,
+        human: bool | None = None,
+    ) -> None:
+        """Click at viewport coordinates ``(x, y)`` or at the center of a matched element.
+
+        Two mutually exclusive ways to pick the target:
+
+        1. **Coordinates** (backward compatible): ``click(100, 200)`` dispatches
+           ``Input.dispatchMouseEvent`` at the given point — unchanged behaviour.
+        2. **CSS selector**: ``click(selector="button[type=submit]")`` finds the
+           first element matching the selector (``document.querySelector``),
+           reads its center via ``getBoundingClientRect()`` and clicks that point.
+        3. **Visible text**: ``click(text="Sign Up")`` finds the smallest visible
+           element whose ``textContent`` contains the given text
+           (case-insensitive, partial match) and clicks its center.
+
+        Selector/text resolution runs through the same ``Runtime.evaluate``
+        mechanism as :meth:`upload` / :meth:`paste` — no extension change needed.
+
+        Args:
+            x, y: Viewport coordinates. Omit both when using ``selector``/``text``.
+            selector: CSS selector of the element to click.
+            text: Text to look for inside a visible element.
+            human: ``False`` bypasses humanizer; ``None`` uses session default.
+
+        Raises:
+            ValueError: If neither coordinates nor selector/text is given, if both
+                coordinates and selector/text are given, if both ``selector`` and
+                ``text`` are given, or when no matching/visible element is found.
+        """
+        if selector is not None and text is not None:
+            raise ValueError("click: pass either selector or text, not both")
+        if selector is None and text is None:
+            if x is None or y is None:
+                raise TypeError(
+                    "click() missing coordinates — pass (x, y) or selector=/text="
+                )
+            cx, cy = int(x), int(y)
+        else:
+            if x is not None or y is not None:
+                raise ValueError("click: coordinates (x, y) cannot be combined with selector/text")
+            cx, cy = await self._resolve_click_target(selector, text)
+
         h = self._humanize_for_call(human)
         if h:
             await h.before("click")
         raw_flag = {"_ceki_raw": True} if h is None else {}
         await self.send({"method": "Input.dispatchMouseEvent", "params": {
-            "type": "mousePressed", "x": int(x), "y": int(y), "button": "left", "clickCount": 1,
+            "type": "mousePressed", "x": cx, "y": cy, "button": "left", "clickCount": 1,
             **raw_flag,
         }})
         await self.send({"method": "Input.dispatchMouseEvent", "params": {
-            "type": "mouseReleased", "x": int(x), "y": int(y), "button": "left", "clickCount": 1,
+            "type": "mouseReleased", "x": cx, "y": cy, "button": "left", "clickCount": 1,
         }})
-        self._last_pointer = (int(x), int(y))
+        self._last_pointer = (cx, cy)
         if h:
             await h.after("click")
+
+    async def _resolve_click_target(self, selector: str | None, text: str | None) -> tuple[int, int]:
+        """Resolve ``selector``/``text`` to a clickable center point.
+
+        Runs a single ``Runtime.evaluate`` in the page that returns a JSON string
+        ``{"x": .., "y": ..}`` or ``{"error": "..."}`` (never throws — the
+        expression guards ``querySelector`` nulls and zero-size rects itself).
+
+        Returns:
+            ``(center_x, center_y)`` in viewport CSS pixels.
+
+        Raises:
+            ValueError: When nothing matches / nothing visible is found.
+        """
+        if text is not None:
+            desc = f"text {text!r}"
+            needle_lit = json.dumps(text.lower())
+            # Visible-text scan: cheap `textContent` pre-filter first, then refine
+            # with rendered `innerText` (which excludes display:none children),
+            # INPUT `.value`, zero-size / off-viewport / hidden-by-style filters.
+            # Smallest-area visible candidate wins (deepest leaf = the control
+            # itself, not the container that merely wraps its label).
+            expr = (
+                "(function(){"
+                "var needle = " + needle_lit + ";"
+                "var all = document.querySelectorAll('body *');"
+                "var skip = {SCRIPT:1,STYLE:1,NOSCRIPT:1,TEMPLATE:1,META:1,LINK:1,TITLE:1,HEAD:1};"
+                "var best = null, bestArea = Infinity;"
+                "for (var i = 0; i < all.length; i++) {"
+                "  var el = all[i];"
+                "  if (skip[el.tagName]) continue;"
+                "  var raw = el.textContent || '';"
+                "  var isInput = el.tagName === 'INPUT';"
+                "  if ((isInput ? (el.value || '') : raw).toLowerCase().indexOf(needle) === -1) continue;"
+                "  var txt = isInput ? (el.value || '') : (el.innerText !== undefined ? (el.innerText || '') : raw);"
+                "  if (txt.toLowerCase().indexOf(needle) === -1) continue;"
+                "  var r = el.getBoundingClientRect();"
+                "  if (r.width < 1 || r.height < 1) continue;"
+                "  if (r.bottom <= 0 || r.top >= window.innerHeight || r.right <= 0 || r.left >= window.innerWidth) continue;"
+                "  var cs;"
+                "  try { cs = window.getComputedStyle(el); } catch (e) { continue; }"
+                "  if (cs.display === 'none' || cs.visibility === 'hidden' || cs.visibility === 'collapse') continue;"
+                "  var area = r.width * r.height;"
+                "  if (area < bestArea) { bestArea = area; best = el; }"
+                "}"
+                "if (!best) return JSON.stringify({error: 'no visible element with text'});"
+                "try { best.scrollIntoView({block:'center', inline:'center'}); } catch (e) {}"
+                "var rb = best.getBoundingClientRect();"
+                "return JSON.stringify({x: Math.round(rb.left + rb.width / 2), y: Math.round(rb.top + rb.height / 2)});"
+                "})()"
+            )
+        else:
+            desc = f"selector {selector!r}"
+            sel_lit = json.dumps(selector)
+            expr = (
+                "(function(){"
+                "try {"
+                "var el = document.querySelector(" + sel_lit + ");"
+                "if (!el) return JSON.stringify({error: 'no element matched selector'});"
+                "var r0 = el.getBoundingClientRect();"
+                "if (r0.width < 1 || r0.height < 1) return JSON.stringify({error: 'element not visible'});"
+                "try { el.scrollIntoView({block:'center', inline:'center'}); } catch (e) {}"
+                "var r = el.getBoundingClientRect();"
+                "if (r.bottom <= 0 || r.top >= window.innerHeight || r.right <= 0 || r.left >= window.innerWidth)"
+                "  return JSON.stringify({error: 'element is outside the viewport'});"
+                "return JSON.stringify({x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2)});"
+                "} catch (e) { return JSON.stringify({error: 'invalid selector: ' + e.message}); }"
+                "})()"
+            )
+
+        resp = await self.send({
+            "method": "Runtime.evaluate",
+            "params": {"expression": expr, "returnByValue": True},
+        })
+        value = (resp.get("result") or {}).get("value")
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                parsed = None
+        else:
+            parsed = value
+
+        if not isinstance(parsed, dict):
+            raise ValueError(f"click: could not resolve target for {desc}")
+        if parsed.get("error"):
+            raise ValueError(f"click: no element found for {desc} ({parsed['error']})")
+        return int(parsed["x"]), int(parsed["y"])
 
     async def _send_keystroke(self, char: str) -> None:
         from .humanize.keymap import keymap_for_char

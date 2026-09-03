@@ -176,7 +176,15 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
     async def _handle_click(self, params: dict) -> None:
         browser = await self._resolve_browser(params)
         human = params.get("human")
-        await browser.click(int(params["x"]), int(params["y"]), human=human)
+        x = params.get("x")
+        y = params.get("y")
+        await browser.click(
+            int(x) if x is not None else None,
+            int(y) if y is not None else None,
+            selector=params.get("selector"),
+            text=params.get("text"),
+            human=human,
+        )
 
     async def _handle_type(self, params: dict) -> None:
         browser = await self._resolve_browser(params)

@@ -364,27 +364,54 @@ async def _cmd_navigate(args: argparse.Namespace) -> None:
 
 
 async def _cmd_click(args: argparse.Namespace) -> None:
-    # Try daemon IPC
-    try:
-        result = await _daemon_request("/click", {
-            "session_id": args.session_id,
-            "x": args.x,
-            "y": args.y,
-            "human": _human_flag(args),
-        })
-        if result is not None:
+    human = _human_flag(args)
+    if args.selector and args.text:
+        _err("click: pass either --selector or --text, not both")
+        sys.exit(1)
+    if args.selector or args.text:
+        if args.x is not None or args.y is not None:
+            _err("click: coordinates (x y) cannot be combined with --selector/--text")
+            sys.exit(1)
+    else:
+        if args.x is None or args.y is None:
+            _err("x and y coordinates are required (or pass --selector or --text)")
+            sys.exit(1)
+
+    def _ok() -> None:
+        if args.selector or args.text:
+            _out({"ok": True})
+        else:
             _out({"ok": True, "pointer": [args.x, args.y]})
+
+    # Try daemon IPC — only when a daemon is really running. A successful void
+    # handler returns `null`, which is indistinguishable from "no daemon", so
+    # the old code fell through to a second (one-shot) click when the daemon
+    # was up. Guarding with is_running() makes daemon-mode single-click.
+    if is_running():
+        try:
+            await _daemon_request("/click", {
+                "session_id": args.session_id,
+                "x": args.x,
+                "y": args.y,
+                "selector": args.selector,
+                "text": args.text,
+                "human": human,
+            })
+            _ok()
             return
-    except CekiError as e:
-        _err(str(e), "daemon")
-        sys.exit(6)
+        except CekiError as e:
+            if "no element found" in str(e):
+                _err(str(e))
+                sys.exit(1)
+            _err(str(e), "daemon")
+            sys.exit(6)
 
     # Fallback to one-shot
     api_key = _get_api_key()
     client, browser = await _resume_browser(api_key, args.session_id)
     try:
-        await browser.click(args.x, args.y, human=_human_flag(args))
-        _out({"ok": True, "pointer": [args.x, args.y]})
+        await browser.click(args.x, args.y, selector=args.selector, text=args.text, human=human)
+        _ok()
     finally:
         if client._ws:
             await client.disconnect()
@@ -1207,10 +1234,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_nav.add_argument("--no-human", "--raw", action="store_true", dest="no_human",
                        help="Skip humanization for this call")
 
-    p_click = sub.add_parser("click", help="Click at coordinates")
+    p_click = sub.add_parser("click", help="Click at coordinates, CSS selector, or visible text")
     p_click.add_argument("session_id", help="Session ID")
-    p_click.add_argument("x", type=int, help="X coordinate")
-    p_click.add_argument("y", type=int, help="Y coordinate")
+    p_click.add_argument("x", type=int, nargs="?", help="X coordinate (or use --selector/--text)")
+    p_click.add_argument("y", type=int, nargs="?", help="Y coordinate (or use --selector/--text)")
+    p_click.add_argument("--selector", help="CSS selector of element to click, e.g. 'button[type=submit]'")
+    p_click.add_argument("--text", help="Click the smallest visible element containing this text (case-insensitive, partial match)")
     p_click.add_argument("--no-human", "--raw", action="store_true", dest="no_human",
                          help="Skip humanization (mouse jitter) for this call")
 
