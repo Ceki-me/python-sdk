@@ -242,10 +242,11 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
 def _cmd_provider(args: argparse.Namespace) -> int:
     """Run a browser provider via the official docker-browser image.
 
-    Long-running: pulls ``ceki/provider`` (Docker Hub) and runs the container —
-    Chromium + Ceki extension + token handshake — keeping the browser online
-    until SIGTERM/SIGINT.  The provider launcher itself lives in the public repo
-    Ceki-me/docker-browser; the SDK only orchestrates docker.
+    Long-running: pulls the provider image (Docker Hub ``ceki/provider`` with a
+    GHCR fallback) and runs the container — Chromium + Ceki extension + token
+    handshake — keeping the browser online until SIGTERM/SIGINT.  The provider
+    launcher itself lives in the public repo Ceki-me/docker-browser; the SDK
+    only orchestrates docker.
     """
     from ._provider import ProviderError, run_provider
 
@@ -1648,7 +1649,8 @@ def build_parser() -> argparse.ArgumentParser:
         "run",
         help=(
             "Pull and run the official provider image (ceki/provider on "
-            "Docker Hub) and keep the browser online, auto-accepting rentals"
+            "Docker Hub, falling back to ghcr.io/ceki-me/docker-browser) and "
+            "keep the browser online, auto-accepting rentals"
         ),
     )
     p_run.add_argument(
@@ -1657,7 +1659,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_run.add_argument(
         "--image",
-        help="Provider image tag (default: $CEKI_PROVIDER_IMAGE or ceki/provider:latest)",
+        help=(
+            "Provider image tag (default: $CEKI_PROVIDER_IMAGE or "
+            "ceki/provider:latest, falling back to the GHCR build if the "
+            "Docker Hub pull fails)"
+        ),
     )
     p_run.add_argument(
         "--build",

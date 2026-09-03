@@ -2,10 +2,12 @@
 
 A thin wrapper around the official provider image. The provider itself — real
 Chromium + the Ceki extension + token handshake + online poll + liveness —
-lives in the public repo ``Ceki-me/docker-browser`` and ships as the Docker Hub
-image ``ceki/provider``. The SDK does NOT reimplement the provider; it pulls the
-image and runs it, so the launcher stays a single source of truth in
-docker-browser.
+lives in the public repo ``Ceki-me/docker-browser``. The SDK does NOT
+reimplement the provider; it pulls an image and runs it, so the launcher stays a
+single source of truth in docker-browser.  The image is pulled from Docker Hub
+(``ceki/provider:latest``) first and, if that pull fails, from the GHCR build
+(``ghcr.io/ceki-me/docker-browser:latest``) that docker-browser CI publishes on
+every GitHub Release.
 
 CLI entry:
     ceki provider run [--token TOKEN] [--image IMAGE] [--build DIR]
@@ -30,6 +32,10 @@ import shutil
 import subprocess
 
 DEFAULT_IMAGE = "ceki/provider:latest"
+
+# GHCR copy of the same launcher, published by docker-browser CI on every
+# GitHub Release. Used when the Docker Hub tag is not (yet) available.
+FALLBACK_IMAGE = "ghcr.io/ceki-me/docker-browser:latest"
 
 # Public docker-browser envs forwarded from the caller's environment.
 _PUBLIC_ENVS = ("CEKI_PROVIDER_VIEWPORT", "CEKI_PROVIDER_LOG_LEVEL", "TZ", "DISPLAY")
@@ -112,6 +118,38 @@ def _build_image(build_dir: str) -> None:
         raise ProviderError("docker-browser build.sh failed")
 
 
+def _pull_image(docker: str, image: str) -> bool:
+    """Pull ``image`` if not present locally; True if it is runnable now."""
+    if (
+        subprocess.run([docker, "image", "inspect", image], capture_output=True)
+        .returncode
+        == 0
+    ):
+        return True
+    print(f"[ceki-provider] pulling {image} ...")
+    return subprocess.run([docker, "pull", image]).returncode == 0
+
+
+def _pull_or_fallback(docker: str, image: str) -> str:
+    """Return the first image tag that is runnable, trying the GHCR fallback.
+
+    An explicit tag (``--image`` / ``$CEKI_PROVIDER_IMAGE``) is used as-is and
+    never swapped; only the default Docker Hub tag gets the GHCR fallback,
+    since the Hub image may not be published yet.
+    """
+    candidates = [image]
+    if image == DEFAULT_IMAGE:
+        candidates.append(FALLBACK_IMAGE)
+    for candidate in candidates:
+        if _pull_image(docker, candidate):
+            return candidate
+    raise ProviderError(
+        "failed to pull "
+        + " and ".join(f"'{candidate}'" for candidate in candidates)
+        + " — check the image name and network access"
+    )
+
+
 def run_provider(
     *,
     token: str | None = None,
@@ -132,23 +170,15 @@ def run_provider(
     if build:
         _build_image(build)
 
-    # Pull the public image when not present locally.
-    if (
-        subprocess.run([docker, "image", "inspect", image_value], capture_output=True)
-        .returncode
-        != 0
-    ):
-        print(f"[ceki-provider] pulling {image_value} ...")
-        if subprocess.run([docker, "pull", image_value]).returncode != 0:
-            raise ProviderError(
-                f"failed to pull {image_value} — check the image name and network"
-            )
+    # Resolve a runnable image: the Docker Hub tag first, the GHCR copy as a
+    # fallback when the Hub tag is not published (or not reachable) yet.
+    run_image = _pull_or_fallback(docker, image_value)
 
     env = _env_map(token_value, viewport=viewport, verbose=verbose)
-    cmd = _run_cmd(docker, image_value, env, timeout=timeout)
+    cmd = _run_cmd(docker, run_image, env, timeout=timeout)
 
     print(
-        f"[ceki-provider] starting {image_value} — browser online until stopped "
+        f"[ceki-provider] starting {run_image} — browser online until stopped "
         "(Ctrl-C / docker stop)"
     )
     try:
