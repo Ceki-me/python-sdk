@@ -35,6 +35,7 @@ async def test_daemon_reuses_shared_client_per_api_key():
     handler = _make_handler(daemon)
 
     shared = AsyncMock()
+    shared._closed = False
     shared.rent = AsyncMock(side_effect=[
         _make_browser("s1", shared),
         _make_browser("s2", shared),
@@ -78,6 +79,61 @@ async def test_daemon_rent_failure_does_not_leak_new_client():
     assert daemon._clients == {}
     assert daemon._sessions == {}
     shared.disconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_daemon_rent_timeout_recreates_poisoned_shared_client():
+    """A rent that times out on a half-dead WS must drop the client and retry
+    on a fresh connection instead of 504ing forever (ev report: POST /rent 504
+    every time once the shared WS stopped routing rent/match)."""
+    daemon = DaemonServer()
+    handler = _make_handler(daemon)
+
+    poisoned = AsyncMock()
+    poisoned._closed = False
+    poisoned.rent = AsyncMock(side_effect=TimeoutError("rent timed out"))
+
+    fresh = AsyncMock()
+    fresh._closed = False
+    fresh.rent = AsyncMock(side_effect=[_make_browser("s1", fresh)])
+
+    connect_mock = AsyncMock(side_effect=[poisoned, fresh])
+    with patch("ceki_sdk.daemon.connect", connect_mock):
+        r = await handler._handle_rent({"api_key": "key", "schedule": 5})
+
+    assert r["session_id"] == "s1"
+    # Poisoned client dropped from cache + disconnected, fresh one registered.
+    assert daemon._clients["key"] is fresh
+    assert set(daemon._sessions) == {"s1"}
+    assert connect_mock.await_count == 2
+    poisoned.disconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_daemon_rent_timeout_retry_failure_also_drops_fresh_client():
+    """If the retry on the fresh client times out too, that client is dropped
+    as well — the daemon is left with no cached client so the NEXT request
+    reconnects instead of hitting a half-dead WS again."""
+    daemon = DaemonServer()
+    handler = _make_handler(daemon)
+
+    poisoned = AsyncMock()
+    poisoned._closed = False
+    poisoned.rent = AsyncMock(side_effect=TimeoutError("rent timed out"))
+
+    fresh = AsyncMock()
+    fresh._closed = False
+    fresh.rent = AsyncMock(side_effect=TimeoutError("rent timed out"))
+
+    connect_mock = AsyncMock(side_effect=[poisoned, fresh])
+    with patch("ceki_sdk.daemon.connect", connect_mock):
+        with pytest.raises(TimeoutError):
+            await handler._handle_rent({"api_key": "key", "schedule": 5})
+
+    assert daemon._clients == {}
+    assert daemon._sessions == {}
+    poisoned.disconnect.assert_awaited_once()
+    fresh.disconnect.assert_awaited_once()
 
 
 @pytest.mark.asyncio

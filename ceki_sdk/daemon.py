@@ -20,7 +20,7 @@ from typing import Any
 
 from . import ConnectOptions, connect
 from ._browser import _unwrap_screenshot_data
-from ._exceptions import SessionNotFound
+from ._exceptions import ConnectionLost, SessionNotFound
 
 log = logging.getLogger(__name__)
 
@@ -163,18 +163,42 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
         # single WebSocket.  Old per-rent clients were never closed, leaking a
         # live WS per rent and confusing relay cdp_response routing.
         daemon = self.server.daemon_server
-        client = daemon._clients.get(api_key)
-        created = client is None
-        if created:
-            client = await connect(api_key, _connect_options())
-            client._on_session_ended = daemon._on_session_ended
-            daemon._clients[api_key] = client
+
+        async def _shared_client():
+            client = daemon._clients.get(api_key)
+            # A cached client may be closed already (WS torn down after the
+            # last session ended, or by a failed rent) — never reuse it.
+            if client is None or client._closed or client._ws is None:
+                client = await connect(api_key, _connect_options())
+                client._on_session_ended = daemon._on_session_ended
+                daemon._clients[api_key] = client
+            return client
+
+        client = await _shared_client()
         try:
             browser = await client.rent(schedule, mode=mode, fingerprint=fp_data)
+        except (TimeoutError, ConnectionLost) as exc:
+            # The shared WS is half-dead: the relay stopped routing rent/match
+            # without a close frame, so the TCP socket stays ESTABLISHED,
+            # recv() never raises and pongs keep coming — neither the reader
+            # nor the heartbeat notices.  Every rent through it hangs 90s and
+            # 504s forever until the daemon restarts.  Drop the poisoned client
+            # and retry ONCE on a fresh connection.
+            log.warning(
+                "rent failed for %s (%s) — recreating shared client",
+                api_key, type(exc).__name__,
+            )
+            await daemon._drop_client(api_key, client)
+            client = await _shared_client()
+            try:
+                browser = await client.rent(schedule, mode=mode, fingerprint=fp_data)
+            except Exception:
+                await daemon._drop_client(api_key, client)
+                raise
         except Exception:
-            if created:
-                daemon._clients.pop(api_key, None)
             if not daemon._client_has_sessions(client):
+                if daemon._clients.get(api_key) is client:
+                    daemon._clients.pop(api_key, None)
                 try:
                     await client.disconnect()
                 except Exception:
@@ -499,6 +523,23 @@ class DaemonServer:
             await client.disconnect()
         except Exception as exc:
             log.debug("disconnect shared client: %s", exc, exc_info=True)
+
+    async def _drop_client(self, api_key: str, client: Any) -> None:
+        """Remove a poisoned shared client and drop its sessions.
+
+        Called when a rent times out on a client whose WebSocket went half-dead
+        (relay stopped routing without a close frame).  That WS can no longer
+        carry rent/match messages, so the client is dropped from the cache and
+        any sessions it owned are discarded — they are unreachable anyway.
+        """
+        if self._clients.get(api_key) is client:
+            self._clients.pop(api_key, None)
+        for sid in [
+            sid for sid, browser in self._sessions.items()
+            if browser._client is client
+        ]:
+            self._sessions.pop(sid, None)
+        await self._disconnect_client(client)
 
     async def _maybe_disconnect_clients(self) -> None:
         """Disconnect shared clients once the last session for them is gone.

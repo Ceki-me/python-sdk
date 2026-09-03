@@ -216,6 +216,12 @@ class Client:
                 self._pending_rent_queue.remove(fut)
             except ValueError:
                 pass
+            # ``rent_pending`` already moved *fut* into ``_pending_rents`` keyed
+            # by the relay's event_id — drop it there too, or a long-running
+            # client (the daemon) accumulates a dead future per timed-out rent.
+            for eid, pfut in list(self._pending_rents.items()):
+                if pfut is fut:
+                    del self._pending_rents[eid]
             raise TimeoutError("rent timed out waiting for match")
 
         # Wait for P2P WebRTC transport to initialize before returning Browser.
