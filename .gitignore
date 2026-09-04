@@ -19,3 +19,6 @@ graphify-out/
 .claude/
 .graphifyignore
 .mypy_cache/
+
+# local leftover: old provider build dir (image moved to Ceki-me/docker-browser)
+docker/

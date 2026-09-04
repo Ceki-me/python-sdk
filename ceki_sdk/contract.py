@@ -250,6 +250,10 @@ class ContractClient:
         return body
 
     def raw(self, tool: str, args: dict[str, Any] | None = None) -> Any:
+        # prompts/list and prompts/get are MCP protocol methods (JSON-RPC),
+        # not tools. Call _rpc directly instead of tools/call.
+        if tool.startswith("prompts/"):
+            return self._rpc(tool, args or {})
         return self.call(tool, args)
 
     # ── domain helpers ────────────────────────────────────────────

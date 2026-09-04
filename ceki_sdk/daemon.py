@@ -20,7 +20,7 @@ from typing import Any
 
 from . import ConnectOptions, connect
 from ._browser import _unwrap_screenshot_data
-from ._exceptions import SessionNotFound
+from ._exceptions import ConnectionLost, SessionNotFound
 
 log = logging.getLogger(__name__)
 
@@ -159,9 +159,52 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
                 profile = json.load(f)
             fp_data = profile.get("fingerprint") or True
 
-        client = await connect(api_key, _connect_options())
-        browser = await client.rent(schedule, mode=mode, fingerprint=fp_data)
-        self.server.daemon_server._sessions[browser.session_id] = (client, browser)
+        # Reuse ONE shared Client per api_key — all sessions multiplex over a
+        # single WebSocket.  Old per-rent clients were never closed, leaking a
+        # live WS per rent and confusing relay cdp_response routing.
+        daemon = self.server.daemon_server
+
+        async def _shared_client():
+            client = daemon._clients.get(api_key)
+            # A cached client may be closed already (WS torn down after the
+            # last session ended, or by a failed rent) — never reuse it.
+            if client is None or client._closed or client._ws is None:
+                client = await connect(api_key, _connect_options())
+                client._on_session_ended = daemon._on_session_ended
+                daemon._clients[api_key] = client
+            return client
+
+        client = await _shared_client()
+        try:
+            browser = await client.rent(schedule, mode=mode, fingerprint=fp_data)
+        except (TimeoutError, ConnectionLost) as exc:
+            # The shared WS is half-dead: the relay stopped routing rent/match
+            # without a close frame, so the TCP socket stays ESTABLISHED,
+            # recv() never raises and pongs keep coming — neither the reader
+            # nor the heartbeat notices.  Every rent through it hangs 90s and
+            # 504s forever until the daemon restarts.  Drop the poisoned client
+            # and retry ONCE on a fresh connection.
+            log.warning(
+                "rent failed for %s (%s) — recreating shared client",
+                api_key, type(exc).__name__,
+            )
+            await daemon._drop_client(api_key, client)
+            client = await _shared_client()
+            try:
+                browser = await client.rent(schedule, mode=mode, fingerprint=fp_data)
+            except Exception:
+                await daemon._drop_client(api_key, client)
+                raise
+        except Exception:
+            if not daemon._client_has_sessions(client):
+                if daemon._clients.get(api_key) is client:
+                    daemon._clients.pop(api_key, None)
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+            raise
+        daemon._sessions[browser.session_id] = browser
         return {
             "session_id": browser.session_id,
             "chat_topic_id": browser.chat_topic_id,
@@ -233,17 +276,14 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
 
     async def _handle_stop(self, params: dict) -> None:
         session_id = params.get("session_id", "")
-        entry = self.server.daemon_server._sessions.pop(session_id, None)
-        if entry is None:
+        browser = self.server.daemon_server._sessions.pop(session_id, None)
+        if browser is None:
             raise ValueError(f"session not found: {session_id}")
-        client, browser = entry
         try:
             await browser.close()
         finally:
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
+            # Shared client is disconnected only when the LAST session ends.
+            await self.server.daemon_server._maybe_disconnect_clients()
 
     async def _handle_chat_send(self, params: dict) -> dict:
         browser = await self._resolve_browser(params)
@@ -342,14 +382,14 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
     # ── session resolution ─────────────────────────────────────────────
 
     async def _resolve_browser(self, params: dict):
-        """Look up a stored (Client, Browser) pair by session_id."""
+        """Look up a stored Browser by session_id."""
         session_id = params.get("session_id", "")
         if not session_id:
             raise ValueError("session_id required")
-        entry = self.server.daemon_server._sessions.get(session_id)
-        if entry is None:
+        browser = self.server.daemon_server._sessions.get(session_id)
+        if browser is None:
             raise SessionNotFound(f"session not found: {session_id}")
-        return entry[1]
+        return browser
 
 
 _ENDPOINTS: dict[str, str] = {
@@ -389,9 +429,13 @@ class DaemonServer:
     - A daemon thread runs a ``ThreadingHTTPServer`` that accepts IPC requests.
     - The HTTP handler calls :meth:`run_async` to schedule a coroutine on the
       event-loop and waits for its result — bridging sync → async boundaries.
-    - Sessions are stored in memory as ``{session_id: (Client, Browser)}``.
+    - Sessions are stored in memory as ``{session_id: Browser}``.
+    - Clients are shared per ``api_key`` in ``{api_key: Client}`` — all sessions
+      of one key multiplex over a single WebSocket, so there is never more than
+      one live connection per key.
     - ``SIGTERM`` / ``SIGINT`` triggers a graceful shutdown: all sessions are
-      closed, the PID file is removed, and the event-loop stops.
+      closed, shared clients are disconnected, the PID file is removed, and the
+      event-loop stops.
     """
 
     def __init__(self, host: str = DAEMON_HOST, port: int | None = None) -> None:
@@ -400,7 +444,8 @@ class DaemonServer:
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._sessions: dict[str, tuple[Any, Any]] = {}
+        self._sessions: dict[str, Any] = {}
+        self._clients: dict[str, Any] = {}
 
     # ── public API ─────────────────────────────────────────────────────
 
@@ -451,20 +496,86 @@ class DaemonServer:
     async def _shutdown(self) -> None:
         log.info("shutting down (closing %d session(s))", len(self._sessions))
         # Close all sessions
-        for session_id, (client, browser) in list(self._sessions.items()):
+        for session_id, browser in list(self._sessions.items()):
             try:
                 await browser.close()
             except Exception as exc:
                 log.debug("close session %s: %s", session_id, exc, exc_info=True)
+        self._sessions.clear()
+        # Disconnect all shared clients
+        for api_key, client in list(self._clients.items()):
             try:
                 await client.disconnect()
             except Exception:
                 pass
-        self._sessions.clear()
+        self._clients.clear()
         # Stop HTTP server (blocking call offloaded to thread pool)
         if self._httpd:
             await asyncio.to_thread(self._httpd.shutdown)
         self._loop.stop()
+
+    def _client_has_sessions(self, client: Any) -> bool:
+        """True if any live session belongs to *client* (via its Browser)."""
+        return any(browser._client is client for browser in self._sessions.values())
+
+    async def _disconnect_client(self, client: Any) -> None:
+        try:
+            await client.disconnect()
+        except Exception as exc:
+            log.debug("disconnect shared client: %s", exc, exc_info=True)
+
+    async def _drop_client(self, api_key: str, client: Any) -> None:
+        """Remove a poisoned shared client and drop its sessions.
+
+        Called when a rent times out on a client whose WebSocket went half-dead
+        (relay stopped routing without a close frame).  That WS can no longer
+        carry rent/match messages, so the client is dropped from the cache and
+        any sessions it owned are discarded — they are unreachable anyway.
+        """
+        if self._clients.get(api_key) is client:
+            self._clients.pop(api_key, None)
+        for sid in [
+            sid for sid, browser in self._sessions.items()
+            if browser._client is client
+        ]:
+            self._sessions.pop(sid, None)
+        await self._disconnect_client(client)
+
+    async def _maybe_disconnect_clients(self) -> None:
+        """Disconnect shared clients once the last session for them is gone.
+
+        Called from the HTTP handler (not the client's own reader task), so
+        awaiting ``client.disconnect()`` here is safe.
+        """
+        if self._sessions:
+            return
+        clients = list(self._clients.items())
+        self._clients.clear()
+        for _, client in clients:
+            await self._disconnect_client(client)
+
+    async def _on_session_ended(self, session_id: str) -> None:
+        """Daemon-side cleanup when a rented session ends on the relay.
+
+        Invoked by the shared :class:`Client` on ``session.ended``/``session_end``
+        (see ``_client.py``).  Removes the session from ``_sessions`` and, when
+        the last session is gone, closes the shared client's WebSocket so the
+        relay never accumulates orphan connections.
+
+        This runs inside the client's own reader task, so disconnecting the
+        client must be deferred to a separate task — ``disconnect()`` cancels
+        the reader task, which would otherwise cancel this very coroutine and
+        skip the actual WS/P2P teardown.
+        """
+        self._sessions.pop(session_id, None)
+        if self._sessions:
+            return
+        clients = list(self._clients.items())
+        self._clients.clear()
+        for _, client in clients:
+            # Stop the reader loop synchronously; teardown happens in a task.
+            client._closed = True
+            asyncio.create_task(self._disconnect_client(client))
 
     def _cleanup(self) -> None:
         PID_FILE.unlink(missing_ok=True)
