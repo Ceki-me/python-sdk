@@ -22,7 +22,7 @@ from ._profile import BrowserProfile
 from ._provider import ProviderError, run_provider
 from .humanize import HumanProfile
 
-__version__ = "2.36.2"
+__version__ = "2.37.0"
 __all__ = [
     "connect",
     "ConnectOptions",
