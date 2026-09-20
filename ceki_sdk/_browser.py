@@ -993,7 +993,9 @@ class Browser:
         }
         if method in download_methods:
             for cb in self._download_callbacks:
-                asyncio.create_task(cast(Coroutine, cb(method, params)))
+                result = cb(params)
+                if asyncio.iscoroutine(result):
+                    asyncio.create_task(result)
 
         for cb in self._event_callbacks:
             asyncio.create_task(cast(Coroutine, cb(method, params)))
