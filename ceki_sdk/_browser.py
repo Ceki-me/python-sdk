@@ -27,7 +27,7 @@ from ._exceptions import (
     RateLimitExceeded,
     SessionEnded,
 )
-from ._models import Match, Snapshot
+from ._models import Match, Snapshot, DownloadMeta, DownloadChunk
 
 log = logging.getLogger(__name__)
 
@@ -100,6 +100,7 @@ class Browser:
         self._provider_reconnected_callbacks: list[SimpleCallback] = []
         self._user_event_callbacks: list[UserEventCallback] = []
         self._capture_frame_callbacks: list[CaptureFrameCallback] = []
+        self._download_callbacks: list[Callable[[dict[str, Any]], Awaitable[None]]] = []
         self._ended = asyncio.Event()
         self._ended_reason: str | None = None
 
@@ -288,6 +289,10 @@ class Browser:
     async def stop_screencast(self) -> dict[str, Any]:
         """Stop the screencast stream (sends ``Page.stopScreencast``)."""
         return await self.send({"method": "Page.stopScreencast"})
+
+    def on_download(self, callback: EventCallback) -> None:
+        """Register a callback for download events (download-meta / download-chunk)."""
+        self._download_callbacks.append(callback)
 
     async def switch_tab(self) -> None:
         await self._client._ws_send({"type": "switch_tab", "session_id": self.session_id})
@@ -976,6 +981,20 @@ class Browser:
     async def _on_cdp_event(self, msg: dict[str, Any]) -> None:
         method = msg.get("method", "")
         params = msg.get("params", {})
+
+        # task 10135 — surface Browser.downloadWillBegin / Browser.downloadProgress
+        # to consumers via on_download(). Also forward synthetic Ceki.downloadMeta /
+        # Ceki.downloadChunk (body-transfer chunks sent by extension).
+        download_methods = {
+            "Browser.downloadWillBegin",
+            "Browser.downloadProgress",
+            "Ceki.downloadMeta",
+            "Ceki.downloadChunk",
+        }
+        if method in download_methods:
+            for cb in self._download_callbacks:
+                asyncio.create_task(cast(Coroutine, cb(method, params)))
+
         for cb in self._event_callbacks:
             asyncio.create_task(cast(Coroutine, cb(method, params)))
 

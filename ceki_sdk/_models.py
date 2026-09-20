@@ -86,3 +86,20 @@ class Snapshot(BaseModel):
     screenshot: str
     chat: list[ChatMessage] = []
     ts: datetime
+
+
+class DownloadMeta(BaseModel):
+    """Metadata for a download file transfer."""
+    guid: str
+    url: str
+    suggested_filename: str
+    total_bytes: int
+    mime_type: str = "application/octet-stream"
+
+
+class DownloadChunk(BaseModel):
+    """A chunk of a downloaded file body."""
+    guid: str
+    seq: int
+    total: int
+    payload: str
