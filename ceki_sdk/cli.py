@@ -282,6 +282,7 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
             "schedule": args.schedule,
             "mode": args.mode,
             "fingerprint_from": fp_from,
+            "vault": vault_arg,
         })
         if ok:
             sid = result["session_id"]
@@ -693,6 +694,206 @@ async def _cmd_sessions(args: argparse.Namespace) -> None:
     finally:
         if client._ws:
             await client.disconnect()
+
+
+# ── Vault subcommands (task 11622 — Vault 7) ────────────────────────────────
+
+
+def _vault_http_client() -> Any:
+    """A ``Client`` wired for plain HTTP vault calls — no relay / WebSocket.
+
+    The vault routes are plain ``httpx`` calls keyed off ``api_url``
+    (see ClientVault), so unlike every other CLI command this intentionally
+    does NOT call ``connect()`` and never opens the relay WebSocket. The API
+    key and any ``CEKI_API_URL`` / basic-auth overrides are read exactly like
+    ``connect()`` would, keeping dev/staging usage identical.
+    """
+    from ._client import Client
+
+    api_key = _get_api_key()
+    opts = _connect_options()
+    return Client(
+        api_key=api_key,
+        relay_url=opts.relay_url if opts.relay_url else "wss://browser.ceki.me/ws/agent",
+        api_url=opts.api_url if opts.api_url else "https://api.ceki.me",
+        chat_url=opts.chat_url if opts.chat_url else "https://chat.ceki.me/api/chat",
+        reconnect=False,
+        basic_auth=opts.basic_auth,
+    )
+
+
+def _vault_session_summary(s) -> dict[str, Any]:
+    """Compact summary of a VaultSession for list/get output."""
+    data = s.data if isinstance(s.data, dict) else {}
+    n_cookies = len(data.get("cookies", [])) if isinstance(data.get("cookies"), list) else 0
+    storage = data.get("localStorage", {})
+    n_origins = len(storage) if isinstance(storage, dict) else 0
+    urls = s.urls or (data.get("urls", []) if isinstance(data.get("urls"), list) else [])
+    return {
+        "id": s.id,
+        "label": s.label,
+        "user_id": s.user_id,
+        "urls": urls,
+        "cookie_count": n_cookies,
+        "storage_origins": n_origins,
+        "created_at": s.created_at,
+        "updated_at": s.updated_at,
+        "last_browser": s.last_browser,
+    }
+
+
+def _print_vault_list(sessions) -> None:
+    if not sessions:
+        print("No vault sessions.")
+        return
+    header = f"{'ID':<6}{'LABEL':<28}{'URLS':<40}{'UPDATED'}"
+    print(header)
+    for s in sessions:
+        urls = ", ".join(s.urls[:2]) if s.urls else "—"
+        if len(s.urls) > 2:
+            urls += "…"
+        updated = s.updated_at or "—"
+        print(f"{s.id:<6}{(s.label or '—')[:27]:<28}{urls[:39]:<40}{updated}")
+
+
+def _load_vault_profile(path: str) -> dict[str, Any]:
+    """Load a vault profile JSON file (create/update source)."""
+    srcfile = Path(path)
+    if not srcfile.is_file():
+        raise FileNotFoundError(f"profile file not found: {path}")
+    with open(srcfile) as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"profile file must contain a JSON object, got {type(data).__name__}")
+    return data
+
+
+def _validate_vault_payload(data: dict[str, Any]) -> None:
+    """Best-effort shape check; the server encrypts and re-validates anyway."""
+    if "cookies" in data and not isinstance(data["cookies"], list):
+        raise ValueError("vault profile 'cookies' must be an array")
+    for key in ("localStorage", "sessionStorage"):
+        if key in data and not isinstance(data[key], dict):
+            raise ValueError(f"vault profile '{key}' must be an object")
+
+
+async def _cmd_vault(args: argparse.Namespace) -> None:
+    """``ceki vault …`` — list/get/save/apply/delete vault sessions.
+
+    Vault routes are Sanctum user-scoped, so the token must be a user
+    Sanctum token (see ClientVault docstring); agent ``ag_`` keys are not
+    accepted on prod yet. All subcommands run over plain HTTP — no relay
+    session needed except ``apply --session`` (resume) / ``apply --schedule``
+    (rent).
+    """
+    action = args.vault_action
+    client = _vault_http_client()
+
+    if action == "list":
+        sessions = await client.vault.list(per_page=getattr(args, "per_page", 20))
+        if getattr(args, "json", False):
+            _out([_vault_session_summary(s) for s in sessions])
+        else:
+            _print_vault_list(sessions)
+        return
+
+    if action == "get":
+        session = await client.vault.get(int(args.id))
+        if getattr(args, "json", False):
+            _out(session.data or {})
+            return
+        summary = _vault_session_summary(session)
+        print(f"Vault session {session.id}:")
+        print(f"  label:      {session.label or '—'}")
+        print(f"  user_id:    {session.user_id or '—'}")
+        print(f"  updated:    {session.updated_at or '—'}")
+        print(f"  cookies:    {summary['cookie_count']}")
+        print(f"  storage:    {summary['storage_origins']} origin(s)")
+        print(f"  urls:       {', '.join(summary['urls']) if summary['urls'] else '—'}")
+        print("  (use --json for the full decrypted profile or --output to dump it)")
+        if getattr(args, "output", None):
+            with open(args.output, "w") as f:
+                json.dump(session.data or {}, f, indent=2, ensure_ascii=False)
+            print(f"Saved decrypted profile to {args.output}")
+        return
+
+    if action == "save":
+        if args.path:
+            profile = _load_vault_profile(args.path)
+            _validate_vault_payload(profile)
+            try:
+                from ._vault import normalize_profile_for_vault
+                envelope = normalize_profile_for_vault(profile)
+            except Exception:
+                # Not a profile.export() snapshot — pass the file through as the
+                # raw vault envelope the API can encrypt as-is.
+                envelope = profile
+            label = args.label or Path(args.path).name
+        elif args.session:
+            # Snapshot a live rental session, then normalize the exported
+            # profile exactly like BrowserVault.save would.
+            from ._vault import normalize_profile_for_vault
+
+            api_key = _get_api_key()
+            client2, browser = await _resume_browser(api_key, args.session)
+            try:
+                profile = await browser.profile.export(
+                    include_session_storage=not args.no_session_storage,
+                )
+            finally:
+                if client2 and client2._ws:
+                    await client2.disconnect()
+            envelope = normalize_profile_for_vault(profile)
+            label = args.label or f"session {args.session}"
+        else:
+            raise CekiError("vault save needs <path> or --session <id>")
+
+        if args.id is not None:
+            session = await client.vault.update(int(args.id), envelope, label=label)
+            _out({"ok": True, "id": session.id, "action": "updated", "label": label})
+        else:
+            vid = await client.vault.create(envelope, label=label)
+            _out({"ok": True, "id": vid, "action": "created", "label": label})
+        return
+
+    if action == "apply":
+        vid = int(args.id)
+        if args.session:
+            # Apply into an existing rental: resume + restore (session.configure).
+            api_key = _get_api_key()
+            client2, browser = await _resume_browser(api_key, args.session)
+            try:
+                await browser.vault.restore(vid)
+                _out({"ok": True, "vault_session_id": vid, "session_id": browser.session_id})
+            finally:
+                if client2 and client2._ws:
+                    await client2.disconnect()
+            return
+        if args.schedule is None:
+            raise CekiError("vault apply needs --session <id> or --schedule <id>")
+        # Fresh rental with the vault profile restored on rent.
+        api_key = _get_api_key()
+        _client = await connect(api_key, _connect_options())
+        try:
+            browser = await _client.rent(schedule_id=args.schedule, vault=vid)
+            _out({
+                "ok": True,
+                "vault_session_id": vid,
+                "session_id": browser.session_id,
+                "schedule_id": browser.schedule_id,
+            })
+        finally:
+            if _client._ws:
+                await _client.disconnect()
+        return
+
+    if action == "delete":
+        await client.vault.delete(int(args.id))
+        _out({"ok": True, "id": int(args.id), "deleted": True})
+        return
+
+    _err(f"unknown vault action: {action}")
+    sys.exit(1)
 
 
 async def _cmd_my_browsers(args: argparse.Namespace) -> None:
@@ -1319,6 +1520,50 @@ def build_parser() -> argparse.ArgumentParser:
     p_sessions.add_argument("--limit", type=int, default=50, help="Max results")
     p_sessions.add_argument("--json", action="store_true", help="Raw JSON output")
 
+    # ── vault subcommand ────────────────────────────────────────────────
+    p_vault = sub.add_parser(
+        "vault",
+        help="Manage user vault sessions (cookies+localStorage profiles)",
+    )
+    vsub = p_vault.add_subparsers(dest="vault_action", required=True)
+
+    p_vl = vsub.add_parser("list", help="List vault sessions (user-scoped, Sanctum token)")
+    p_vl.add_argument("--per-page", type=int, default=20, dest="per_page",
+                      help="Items per page (backend default 20)")
+    p_vl.add_argument("--json", action="store_true", help="Raw JSON output")
+
+    p_vg = vsub.add_parser("get", help="Show a vault session (decrypted profile)")
+    p_vg.add_argument("id", type=int, help="Vault session id")
+    p_vg.add_argument("--json", action="store_true",
+                      help="Print the full decrypted profile as JSON")
+    p_vg.add_argument("-o", "--output", help="Dump the decrypted profile to a JSON file")
+
+    p_vs = vsub.add_parser(
+        "save",
+        help="Create (or update with --id) a vault session from a profile file "
+             "or a live rental session snapshot",
+    )
+    p_vs.add_argument("path", nargs="?", help="Path to profile JSON "
+                                              "(profile.export() snapshot or vault envelope)")
+    p_vs.add_argument("--session", help="Rental session id to snapshot (via profile.export)")
+    p_vs.add_argument("--id", type=int, help="Existing vault session id to overwrite (PUT)")
+    p_vs.add_argument("--no-session-storage", action="store_true",
+                      help="With --session: exclude sessionStorage from the snapshot")
+    p_vs.add_argument("--label", help="Session label (default: basename of the file / snapshot)")
+
+    p_va = vsub.add_parser(
+        "apply",
+        help="Apply a vault session: fresh rent (--schedule) or into a live session (--session)",
+    )
+    p_va.add_argument("id", type=int, help="Vault session id")
+    p_va.add_argument("--schedule", type=int,
+                      help="Rent a new browser with this schedule and restore the vault")
+    p_va.add_argument("--session",
+                      help="Resume an existing rental session id and restore the vault")
+
+    p_vd = vsub.add_parser("delete", help="Delete a vault session (owner only)")
+    p_vd.add_argument("id", type=int, help="Vault session id")
+
     sub.add_parser("my-browsers", help="List browsers with pre-arranged rent contracts")
 
     p_search = sub.add_parser("search", help="Search available browsers")
@@ -1706,6 +1951,7 @@ def main() -> None:
         "stop": _cmd_stop,
         "profile": _cmd_profile,
         "sessions": _cmd_sessions,
+        "vault": _cmd_vault,
         "my-browsers": _cmd_my_browsers,
         "search": _cmd_search,
         "wait": _cmd_wait,

@@ -380,6 +380,20 @@ The CLI persists session state locally — after `rent` it saves the session ID 
 | `configure SID [--masking-mode VAL] [--fingerprint VAL]` | Toggle masking / fingerprint |
 | `cdp SID --method METHOD [--params JSON]` | Raw CDP command |
 
+#### Vault sessions
+
+| Command | Description |
+|---|---|
+| `vault list [--json] [--per-page N]` | List vault sessions (id, label, urls, updated) |
+| `vault get ID [--json] [-o FILE]` | Show a session; `--json` prints the decrypted profile, `-o` dumps it to a file |
+| `vault save FILE [--id ID] [--label L]` | Create (or PUT-update with `--id`) a session from a profile JSON |
+| `vault save --session SID [--id ID] [--label L] [--no-session-storage]` | Snapshot a live rental session into the vault |
+| `vault apply ID --session SID` | Apply a vault profile into an existing rental (resume + restore) |
+| `vault apply ID --schedule N` | Rent a fresh browser with the vault profile restored |
+| `vault delete ID` | Delete a vault session |
+
+Vault commands run over plain HTTP (no relay session) and are user/Sanctum-scoped — the same token caveat as `client.vault` applies (use a user token).
+
 ### Output and errors
 
 Successful commands write a single JSON line to stdout. Errors go to stderr as `{"error": "...", "code": "..."}`. Pipe stdout through `jq` to chain commands.
