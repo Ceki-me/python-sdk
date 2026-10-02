@@ -185,6 +185,50 @@ async with await client.rent(schedule_id) as browser:
 - Encrypt the blob before writing to disk if it contains sensitive credentials.
 - `import_()` raises `ValueError` on `schema_version` mismatch (future-proofing).
 
+## Browser Vault (server-stored sessions)
+
+The **vault** stores a browser snapshot (cookies + per-origin localStorage/sessionStorage + fingerprint) on the Ceki API (`/api/vault/sessions`, encrypted server-side) so you can restore it on a **different** browser later — the same session profile across machines.
+
+Two surfaces:
+
+**`client.vault`** — HTTP CRUD on vault sessions (no live browser needed):
+
+```python
+# List your vault sessions
+sessions = await client.vault.list()
+for s in sessions:
+    print(s.id, s.label, s.urls)
+
+# Fetch one session with its decrypted profile envelope
+session = await client.vault.get(8)
+data = session.data          # {cookies, localStorage, sessionStorage, fingerprint, urls, collectedAt}
+```
+
+**`browser.vault`** — snapshot save / restore from a rented browser:
+
+```python
+# 1. On browser A — export the current state into a NEW vault session
+vault_id = await browser.vault.save(label="vc.ru session")
+
+#    or overwrite the session you rented with (browser was rented with vault=8)
+vault_id = await browser.vault.save()            # PUT onto the bound id
+
+# 2. On browser B (or the same one later) — rent WITH the vault profile
+async with await client.rent(schedule_id, vault=vault_id) as browser:
+    # cookies applied immediately, localStorage/sessionStorage buffered by the
+    # extension and flushed on first navigation to each origin
+    await browser.send({"method": "Page.navigate", "params": {"url": "https://vc.ru"}})
+
+#    or restore the profile mid-session
+await browser.vault.restore(vault_id)
+```
+
+Notes:
+- Vault restore uses `session.configure(profile=...)` — the extension applies cookies first, then buffers localStorage/sessionStorage until the first navigation to each origin (Vault 3+ extension required).
+- When `vault=<id>` is passed to `rent()`, the browser is bound to that vault session: a later `browser.vault.save()` overwrites it (PUT).
+- The vault endpoints are guarded by Sanctum and resolve to a **user**; use a user token as `api_key` for vault operations.
+- `browser.profile.export()` (local blob) and `browser.vault.save()` (server) are complementary: the first keeps the blob agent-side, the second stores it encrypted on the API.
+
 ## CDP Lifecycle
 
 The relay maintains the CDP connection to the incognito browser tab. If the connection drops, it automatically reattaches with 1s/2s/4s exponential backoff. Commands during reattach are buffered (FIFO, max 50). If 3 reattach attempts fail, a new fallback tab is created. If that also fails, `cdp_unrecoverable` error is sent.
@@ -299,7 +343,7 @@ The CLI persists session state locally — after `rent` it saves the session ID 
 |---|---|
 | `search [--limit N] [--filter K=V]…` | List available browsers |
 | `my-browsers` | List browsers with pre-arranged rent contracts |
-| `rent --schedule ID [--mode incognito\|main] [--fingerprint-from FILE]` | Rent a browser |
+| `rent --schedule ID [--mode incognito\|main] [--fingerprint-from FILE] [--vault SESSION_ID]` | Rent a browser |
 | `sessions [--all] [--limit N] [--json]` | List your sessions |
 | `stop SID` | End a session |
 | `wait SID` | Block until the session ends |

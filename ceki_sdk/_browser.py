@@ -105,9 +105,16 @@ class Browser:
 
         from ._chat import BrowserChat
         from ._profile import BrowserProfile
+        from ._vault import BrowserVault
 
         self.chat = BrowserChat(self)
         self.profile = BrowserProfile(self)
+        self.vault = BrowserVault(self)
+
+        # Bound vault session id — set when the browser was rented with
+        # vault=<id> or restored from one (BrowserVault.restore). BrowserVault.save
+        # PUTs onto this id on overwrite=True.
+        self._vault_session_id: int | None = None
 
         env_profile = os.environ.get("CEKI_HUMAN_PROFILE")
         env_path = os.environ.get("CEKI_HUMAN_PROFILE_PATH")

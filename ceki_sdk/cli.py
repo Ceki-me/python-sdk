@@ -274,6 +274,9 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
 
     # Try daemon IPC
     fp_from = str(Path(args.fingerprint_from).resolve()) if args.fingerprint_from else None
+    vault_arg: int | None = None
+    if getattr(args, "vault", None):
+        vault_arg = int(args.vault)
     try:
         ok, result = await _daemon_request("/rent", {
             "schedule": args.schedule,
@@ -303,7 +306,9 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
         fp_data = profile.get("fingerprint") or True
     client = await connect(api_key, _connect_options())
     try:
-        browser = await client.rent(args.schedule, mode=args.mode, fingerprint=fp_data)
+        browser = await client.rent(
+            args.schedule, mode=args.mode, fingerprint=fp_data, vault=vault_arg,
+        )
         save_session(browser.session_id, {
             "session_id": browser.session_id,
             "chat_topic_id": browser.chat_topic_id,
@@ -314,6 +319,7 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
             "session_id": browser.session_id,
             "chat_topic_id": browser.chat_topic_id,
             "schedule_id": browser.schedule_id,
+            "vault_session_id": getattr(browser, "_vault_session_id", None),
         })
     finally:
         if client._ws:
@@ -1230,6 +1236,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="incognito", help="Profile mode (default: incognito)",
     )
     p_rent.add_argument("--fingerprint-from", help="Path to profile JSON with fingerprint data")
+    p_rent.add_argument("--vault", type=int, metavar="SESSION_ID",
+                        help="Vault session id to restore (cookies+storage+fingerprint)")
 
     p_snap = sub.add_parser("snapshot", help="Take screenshot + get new chat messages")
     p_snap.add_argument("session_id", help="Session ID")

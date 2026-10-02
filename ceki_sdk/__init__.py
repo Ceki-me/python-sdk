@@ -20,6 +20,7 @@ from ._exceptions import (
 from ._models import BrowserOption, ChatMessage, Match, ReadReceipt, SessionInfo, Snapshot
 from ._profile import BrowserProfile
 from ._provider import ProviderError, run_provider
+from ._vault import BrowserVault, ClientVault, VaultSession
 from .humanize import HumanProfile
 
 __version__ = "2.37.1"
@@ -47,6 +48,9 @@ __all__ = [
     "SessionInfo",
     "Snapshot",
     "BrowserProfile",
+    "BrowserVault",
+    "ClientVault",
+    "VaultSession",
     "CekiError",
     "HumanProfile",
     "CaptchaResult",

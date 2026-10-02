@@ -73,6 +73,10 @@ class Client:
         # shared WebSocket once the last session for a client is gone.
         self._on_session_ended: Callable[[str], Awaitable[None]] | None = None
 
+        # Vault HTTP surface (see ceki_sdk/_vault.py)
+        from ._vault import ClientVault
+        self.vault = ClientVault(self)
+
         # P2P WebRTC transport (primary, WS = fallback)
         self._p2p: WebRTCTransport | None = None
         self._p2p_init_lock = asyncio.Lock()
@@ -198,6 +202,7 @@ class Client:
         masking_mode: bool = True,
         fingerprint: bool | dict | None = True,
         pacing_profile: str | None = None,
+        vault: int | dict[str, Any] | None = None,
     ) -> Browser:
         if mode not in ("incognito", "main"):
             raise ValueError(f"mode must be 'incognito' or 'main', got {mode!r}")
@@ -235,8 +240,17 @@ class Client:
 
         browser = Browser(client=self, match=match, human=human)
         self._active_browsers[match.session_id] = browser
+        with_restored = False
+        # Vault profile restore — do it first so the rent() fingerprint branch
+        # below can't clobber a profile-supplied fingerprint. Profile cookies/
+        # storage go through session.configure(profile=...) (Vault 3+ extension).
+        if vault is not None:
+            await browser.vault.restore(vault)
+            with_restored = True
         if not masking_mode:
             await browser.configure(masking_mode=False)
+        if with_restored:
+            return browser
         if isinstance(fingerprint, dict):
             await browser.configure(fingerprint=fingerprint)
         elif fingerprint is False or fingerprint is None:
