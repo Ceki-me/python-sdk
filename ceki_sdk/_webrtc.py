@@ -175,8 +175,12 @@ class WebRTCTransport:
         self._pending_remote_candidates: list[Any] = []
 
         # Callbacks — set by consumer (_client.py)
-        self.on_ice_candidate: Callable[[dict[str, Any]], Coroutine[Any, Any, None] | None] | None = None
-        self.on_cdp_message: Callable[[dict[str, Any]], Coroutine[Any, Any, None] | None] | None = None
+        self.on_ice_candidate: (
+        Callable[[dict[str, Any]], Coroutine[Any, Any, None] | None] | None
+    ) = None
+        self.on_cdp_message: (
+        Callable[[dict[str, Any]], Coroutine[Any, Any, None] | None] | None
+    ) = None
         self.on_capture_data: (
             Callable[[dict[str, Any]], Coroutine[Any, Any, None] | None] | None
         ) = None
@@ -208,7 +212,7 @@ class WebRTCTransport:
             return self._pc
 
         try:
-            from aiortc import RTCPeerConnection, RTCConfiguration, RTCIceServer
+            from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection
         except ImportError:
             raise ImportError(
                 "aiortc is required for P2P WebRTC transport. "
@@ -510,11 +514,8 @@ class WebRTCTransport:
         Queues the candidate if remote description hasn't been set yet
         (mirrors front pendingCandidates pattern).
         """
-        try:
-            from aiortc import RTCIceCandidate
-        except ImportError:
-            raise ImportError("aiortc is required for P2P WebRTC transport")
-
+        # _parse_ice_candidate imports aiortc itself (and raises a clear
+        # ImportError when aiortc is missing), so no local import is needed.
         raw_candidate = candidate.get("candidate", "")
         cand = _parse_ice_candidate(
             raw_candidate,

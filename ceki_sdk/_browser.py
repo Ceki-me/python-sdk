@@ -201,7 +201,10 @@ class Browser:
                         cdp_id,
                     )
                     fut._cdp_transport = 'ws'  # type: ignore[attr-defined]
-                    log.debug("cdp: WS fallback sending cmd %d session=%s method=%s", cdp_id, self.session_id, cdp["method"])
+                    log.debug(
+                        "cdp: WS fallback sending cmd %d session=%s method=%s",
+                        cdp_id, self.session_id, cdp["method"],
+                    )
                     await self._client._ws_send(
                         {
                             "type": "cdp",
@@ -965,7 +968,10 @@ class Browser:
                 # Skip the WS echo and wait for the DC response.
                 transport = getattr(fut, '_cdp_transport', 'ws')
                 is_from_ws = msg.get("type") == "cdp_response" or "session_id" in msg
-                log.debug("_on_cdp_response: transport=%s is_from_ws=%s skip=%s", transport, is_from_ws, transport == 'dc' and is_from_ws)
+                log.debug(
+                    "_on_cdp_response: transport=%s is_from_ws=%s skip=%s",
+                    transport, is_from_ws, transport == 'dc' and is_from_ws,
+                )
                 if transport == 'dc' and is_from_ws:
                     log.debug("cdp: skip WS echo for DC-sent command id=%s", cmd_id)
                     return
@@ -978,7 +984,10 @@ class Browser:
                     log.debug("_on_cdp_response: resolving future with error %s", err)
                     fut.set_exception(Exception(f"CDP error {err}"))
         else:
-            log.debug("_on_cdp_response: id=%s NOT in pending (keys=%s) or None", cmd_id, list(self._pending_cdp.keys()))
+            log.debug(
+                "_on_cdp_response: id=%s NOT in pending (keys=%s) or None",
+                cmd_id, list(self._pending_cdp.keys()),
+            )
 
     async def _on_cdp_event(self, msg: dict[str, Any]) -> None:
         method = msg.get("method", "")
