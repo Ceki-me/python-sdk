@@ -13,8 +13,8 @@ The fix:
 """
 
 import asyncio
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 from ceki_sdk._webrtc import WebRTCTransport
 
