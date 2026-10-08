@@ -188,7 +188,9 @@ class Browser:
                 # ConnectionError/OSError (DC broken): permanent WS fallback via
                 # _p2p_fallback to avoid 30s wait on every subsequent command.
                 try:
-                    await asyncio.wait_for(p2p.wait_dc_open(), timeout=30.0)
+                    # Short grace for the DC to open (ice gathering can take a
+                    # second), then hard-fall back to WS for this session.
+                    await asyncio.wait_for(p2p.wait_dc_open(), timeout=3.0)
                     await p2p.send_cdp({
                         "session_id": self.session_id,
                         "id": cdp_id,
@@ -196,10 +198,15 @@ class Browser:
                         "params": cdp.get("params", {}),
                     })
                 except asyncio.TimeoutError:
+                    # DC never opened (relay/extension never completed the
+                    # signaling). Fall back to WS for good on THIS browser —
+                    # otherwise every subsequent send() re-pays the 30s
+                    # wait_dc_open() stall (test .send(timeout=5) would
+                    # always time out).
                     log.warning(
-                        "cdp: P2P DC not ready within 30s for cmd %d — WS fallback for this cmd",
-                        cdp_id,
+                        "cdp: P2P DC not ready within 30s — permanent WS fallback for this session",
                     )
+                    self._p2p_fallback = True
                     fut._cdp_transport = 'ws'  # type: ignore[attr-defined]
                     log.debug(
                         "cdp: WS fallback sending cmd %d session=%s method=%s",
