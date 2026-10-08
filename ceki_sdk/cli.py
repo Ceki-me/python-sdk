@@ -267,6 +267,11 @@ def _cmd_provider(args: argparse.Namespace) -> int:
 
 
 async def _cmd_rent(args: argparse.Namespace) -> None:
+    # Require the API key up front — auth errors must exit cleanly with
+    # code=auth (2) even when a daemon is already running, instead of a
+    # confusing daemon error (6) from a daemon that never got credentials.
+    api_key = _get_api_key()
+
     # Auto-start daemon on rent — subsequent commands use the persistent WS
     if not _ensure_daemon():
         # Daemon failed to start — fall through to one-shot fallback
@@ -298,8 +303,7 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
         _err(str(e), "daemon")
         sys.exit(6)
 
-    # Fallback to one-shot
-    api_key = _get_api_key()
+    # Fallback to one-shot (daemon unavailable)
     fp_data: bool | dict = True
     if args.fingerprint_from:
         with open(args.fingerprint_from) as f:
