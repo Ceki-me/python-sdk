@@ -106,9 +106,16 @@ class Browser:
 
         from ._chat import BrowserChat
         from ._profile import BrowserProfile
+        from ._vault import BrowserVault
 
         self.chat = BrowserChat(self)
         self.profile = BrowserProfile(self)
+        self.vault = BrowserVault(self)
+
+        # Bound vault session id — set when the browser was rented with
+        # vault=<id> or restored from one (BrowserVault.restore). BrowserVault.save
+        # PUTs onto this id on overwrite=True.
+        self._vault_session_id: int | None = None
 
         env_profile = os.environ.get("CEKI_HUMAN_PROFILE")
         env_path = os.environ.get("CEKI_HUMAN_PROFILE_PATH")
@@ -182,7 +189,9 @@ class Browser:
                 # ConnectionError/OSError (DC broken): permanent WS fallback via
                 # _p2p_fallback to avoid 30s wait on every subsequent command.
                 try:
-                    await asyncio.wait_for(p2p.wait_dc_open(), timeout=30.0)
+                    # Short grace for the DC to open (ice gathering can take a
+                    # second), then hard-fall back to WS for this session.
+                    await asyncio.wait_for(p2p.wait_dc_open(), timeout=3.0)
                     await p2p.send_cdp({
                         "session_id": self.session_id,
                         "id": cdp_id,
@@ -190,12 +199,20 @@ class Browser:
                         "params": cdp.get("params", {}),
                     })
                 except asyncio.TimeoutError:
+                    # DC never opened (relay/extension never completed the
+                    # signaling). Fall back to WS for good on THIS browser —
+                    # otherwise every subsequent send() re-pays the 30s
+                    # wait_dc_open() stall (test .send(timeout=5) would
+                    # always time out).
                     log.warning(
-                        "cdp: P2P DC not ready within 30s for cmd %d — WS fallback for this cmd",
-                        cdp_id,
+                        "cdp: P2P DC not ready within 30s — permanent WS fallback for this session",
                     )
+                    self._p2p_fallback = True
                     fut._cdp_transport = 'ws'  # type: ignore[attr-defined]
-                    log.debug("cdp: WS fallback sending cmd %d session=%s method=%s", cdp_id, self.session_id, cdp["method"])
+                    log.debug(
+                        "cdp: WS fallback sending cmd %d session=%s method=%s",
+                        cdp_id, self.session_id, cdp["method"],
+                    )
                     await self._client._ws_send(
                         {
                             "type": "cdp",
@@ -963,7 +980,10 @@ class Browser:
                 # Skip the WS echo and wait for the DC response.
                 transport = getattr(fut, '_cdp_transport', 'ws')
                 is_from_ws = msg.get("type") == "cdp_response" or "session_id" in msg
-                log.debug("_on_cdp_response: transport=%s is_from_ws=%s skip=%s", transport, is_from_ws, transport == 'dc' and is_from_ws)
+                log.debug(
+                    "_on_cdp_response: transport=%s is_from_ws=%s skip=%s",
+                    transport, is_from_ws, transport == 'dc' and is_from_ws,
+                )
                 if transport == 'dc' and is_from_ws:
                     log.debug("cdp: skip WS echo for DC-sent command id=%s", cmd_id)
                     return
@@ -976,7 +996,10 @@ class Browser:
                     log.debug("_on_cdp_response: resolving future with error %s", err)
                     fut.set_exception(Exception(f"CDP error {err}"))
         else:
-            log.debug("_on_cdp_response: id=%s NOT in pending (keys=%s) or None", cmd_id, list(self._pending_cdp.keys()))
+            log.debug(
+                "_on_cdp_response: id=%s NOT in pending (keys=%s) or None",
+                cmd_id, list(self._pending_cdp.keys()),
+            )
 
     async def _on_cdp_event(self, msg: dict[str, Any]) -> None:
         method = msg.get("method", "")
@@ -1018,8 +1041,15 @@ class Browser:
             asyncio.create_task(cast(Coroutine, cb(url)))
 
     async def _on_session_ended(self, msg: dict[str, Any]) -> None:
-        reason = msg.get("reason", "completed")
-        self._ended_reason = reason
+        if self._ended.is_set():
+            # A terminal error (e.g. -1011 heartbeat_timeout) already ended the
+            # session with a precise reason. A later bare session_ended without
+            # an explicit reason must not clobber it with a generic "completed".
+            if msg.get("reason"):
+                self._ended_reason = msg["reason"]
+        else:
+            self._ended_reason = msg.get("reason", "completed")
+        reason = self._ended_reason
         if reason == "provider_disconnected":
             exc: Exception = ProviderDisconnected()
         else:

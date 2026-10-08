@@ -152,6 +152,7 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
         if not schedule:
             raise ValueError("schedule (int) required")
         mode = params.get("mode", "incognito")
+        vault_arg = params.get("vault")
         fp_data: bool | dict = True
         fp_from = params.get("fingerprint_from")
         if fp_from:
@@ -176,7 +177,7 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
 
         client = await _shared_client()
         try:
-            browser = await client.rent(schedule, mode=mode, fingerprint=fp_data)
+            browser = await client.rent(schedule, mode=mode, fingerprint=fp_data, vault=vault_arg)
         except (TimeoutError, ConnectionLost) as exc:
             # The shared WS is half-dead: the relay stopped routing rent/match
             # without a close frame, so the TCP socket stays ESTABLISHED,
@@ -191,7 +192,9 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
             await daemon._drop_client(api_key, client)
             client = await _shared_client()
             try:
-                browser = await client.rent(schedule, mode=mode, fingerprint=fp_data)
+                browser = await client.rent(
+                    schedule, mode=mode, fingerprint=fp_data, vault=vault_arg,
+                )
             except Exception:
                 await daemon._drop_client(api_key, client)
                 raise
@@ -209,6 +212,7 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
             "session_id": browser.session_id,
             "chat_topic_id": browser.chat_topic_id,
             "schedule_id": browser.schedule_id,
+            "vault_session_id": getattr(browser, "_vault_session_id", None),
         }
 
     async def _handle_navigate(self, params: dict) -> None:

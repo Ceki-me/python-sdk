@@ -306,6 +306,7 @@ async def test_client_dispatch_error_1011_with_event_id_cleans_session():
 
     browser = Mock()
     browser.session_id = "s12"
+    browser._on_error = AsyncMock()
     browser._on_session_ended = AsyncMock()
     client._active_browsers["s12"] = browser
 
@@ -322,7 +323,10 @@ async def test_client_dispatch_error_1011_with_event_id_cleans_session():
         "reason": "provider_disconnected",
     })
     assert ended == ["s12"]
-    browser._on_session_ended.assert_awaited_once()
+    # -1011 is routed through _on_error (preserves the precise terminal
+    # reason like heartbeat_timeout) and then the daemon cleanup hook runs.
+    browser._on_error.assert_awaited_once()
+    browser._on_session_ended.assert_not_awaited()
 
 
 @pytest.mark.asyncio

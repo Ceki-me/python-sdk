@@ -73,6 +73,10 @@ class Client:
         # shared WebSocket once the last session for a client is gone.
         self._on_session_ended: Callable[[str], Awaitable[None]] | None = None
 
+        # Vault HTTP surface (see ceki_sdk/_vault.py)
+        from ._vault import ClientVault
+        self.vault = ClientVault(self)
+
         # P2P WebRTC transport (primary, WS = fallback)
         self._p2p: WebRTCTransport | None = None
         self._p2p_init_lock = asyncio.Lock()
@@ -198,6 +202,7 @@ class Client:
         masking_mode: bool = True,
         fingerprint: bool | dict | None = True,
         pacing_profile: str | None = None,
+        vault: int | dict[str, Any] | None = None,
     ) -> Browser:
         if mode not in ("incognito", "main"):
             raise ValueError(f"mode must be 'incognito' or 'main', got {mode!r}")
@@ -227,7 +232,13 @@ class Client:
         # Wait for P2P WebRTC transport to initialize before returning Browser.
         # Otherwise Browser.send() races with _init_p2p() — first CDP falls back
         # to WS because self._p2p is still None.
-        if self._p2p_enabled and not self._p2p_ready.is_set():
+        #
+        # Only wait when P2P has actually been initiated (the relay answered
+        # with a webrtc.offer / the extension started a host-initiated P2P).
+        # If _p2p is still None the signaling never started (or failed) and the
+        # WS path is already the right one — waiting the full 15s here would
+        # stall every rent when the relay simply doesn't do P2P.
+        if self._p2p_enabled and not self._p2p_ready.is_set() and self._p2p is not None:
             try:
                 await asyncio.wait_for(self._p2p_ready.wait(), timeout=15)
             except asyncio.TimeoutError:
@@ -235,8 +246,17 @@ class Client:
 
         browser = Browser(client=self, match=match, human=human)
         self._active_browsers[match.session_id] = browser
+        with_restored = False
+        # Vault profile restore — do it first so the rent() fingerprint branch
+        # below can't clobber a profile-supplied fingerprint. Profile cookies/
+        # storage go through session.configure(profile=...) (Vault 3+ extension).
+        if vault is not None:
+            await browser.vault.restore(vault)
+            with_restored = True
         if not masking_mode:
             await browser.configure(masking_mode=False)
+        if with_restored:
+            return browser
         if isinstance(fingerprint, dict):
             await browser.configure(fingerprint=fingerprint)
         elif fingerprint is False or fingerprint is None:
@@ -589,9 +609,14 @@ class Client:
             browser = self._active_browsers.get(session_id) if session_id else None
             if browser is not None and msg.get("code", 0) in (-1011, -1018):
                 # Relay reports a session end as ``error -1011/-1018`` (provider
-                # death, grace expiry, admin kill).  Clean up exactly like
-                # ``session_ended`` so the daemon never keeps a dead session.
-                await browser._on_session_ended(msg)
+                # death, grace expiry, admin kill). Route through
+                # ``_on_error`` first so the terminal reason (e.g.
+                # ``heartbeat_timeout`` for -1011) is preserved — calling
+                # ``_on_session_ended`` directly would clobber it with a
+                # generic ``completed`` when the message has no ``reason``
+                # field. Then clean up exactly like ``session_ended`` so the
+                # daemon never keeps a dead session.
+                await browser._on_error(msg)
                 hook = self._on_session_ended
                 if hook is not None:
                     try:

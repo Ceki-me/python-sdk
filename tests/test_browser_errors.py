@@ -91,8 +91,14 @@ async def test_error_1013_rate_limit_does_not_end_session(browser_and_relay):
     browser, mock_relay = browser_and_relay
 
     async def pending_cdp():
-        await asyncio.sleep(0.05)
-        cdp_msg = next((m for m in mock_relay.received if m.get("type") == "cdp"), None)
+        # Wait for the client's cdp WS message (small retry — don't assume the
+        # send() writes it within a fixed 0.05s under CI load).
+        cdp_msg = None
+        for _ in range(250):
+            cdp_msg = next((m for m in mock_relay.received if m.get("type") == "cdp"), None)
+            if cdp_msg is not None:
+                break
+            await asyncio.sleep(0.02)
         assert cdp_msg is not None
         await mock_relay.send_to_all({
             "type": "error",
@@ -117,8 +123,14 @@ async def test_error_1050_cdp_unrecoverable_does_not_end_session(browser_and_rel
     browser, mock_relay = browser_and_relay
 
     async def pending_cdp():
-        await asyncio.sleep(0.05)
-        cdp_msg = next((m for m in mock_relay.received if m.get("type") == "cdp"), None)
+        # Wait for the client's cdp WS message (small retry — don't assume the
+        # send() writes it within a fixed 0.05s under CI load).
+        cdp_msg = None
+        for _ in range(250):
+            cdp_msg = next((m for m in mock_relay.received if m.get("type") == "cdp"), None)
+            if cdp_msg is not None:
+                break
+            await asyncio.sleep(0.02)
         assert cdp_msg is not None
         await mock_relay.send_to_all({
             "type": "error",

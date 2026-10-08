@@ -15,9 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -310,7 +309,9 @@ async def test_queued_candidates_pending_until_remote_desc():
     t._pc = mock_pc
 
     # Now add another candidate — should go to PC directly, not queue
-    await t.add_ice_candidate(_make_ice_candidate_dict(candidate="candidate:2 1 UDP 54321 5.6.7.8 5678 typ host"))
+    await t.add_ice_candidate(
+        _make_ice_candidate_dict(candidate="candidate:2 1 UDP 54321 5.6.7.8 5678 typ host")
+    )
     assert len(t._pending_remote_candidates) == 1  # still only the first one
     mock_pc.addIceCandidate.assert_called_once()
 
@@ -608,22 +609,6 @@ async def test_dispatch_webrtc_answer_no_ice_servers():
     await c._dispatch(answer_msg)
 
     p2p_mock.set_remote_description.assert_called_once_with("v=0\r\n", type="answer")
-
-
-@pytest.mark.asyncio
-async def test_dispatch_webrtc_answer_no_ice_servers():
-    """webrtc.answer without ice_servers should not crash."""
-    from ceki_sdk._client import Client
-
-    c = Client(api_key="test", relay_url="ws://localhost:9999",
-               api_url="https://api.example.com", chat_url="https://chat.example.com")
-    p2p_mock = MagicMock()
-    p2p_mock.set_remote_description = AsyncMock()
-    c._p2p = p2p_mock
-
-    answer_msg = {"type": "webrtc.answer", "session_id": "test", "sdp": "v=0\r\n"}
-    # Should not raise
-    await c._dispatch(answer_msg)
 
 
 @pytest.mark.asyncio

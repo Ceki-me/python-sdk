@@ -284,7 +284,9 @@ def test_vote_payload_shape():
 
 
 def test_upload_file_base64_and_defaults():
-    http, _ = _http_mock(_mcp_text({"id": 42, "name": "report.pdf", "url": "//x/f", "size": 7, "disk": "upload"}))
+    http, _ = _http_mock(
+        _mcp_text({"id": 42, "name": "report.pdf", "url": "//x/f", "size": 7, "disk": "upload"})
+    )
     c = ContractClient(client=http, endpoint="http://x/mcp/agent", token="t")
     res = c.upload_file(b"content", filename="report.pdf")
     body = _captured_body(http)
