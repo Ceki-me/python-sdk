@@ -1013,8 +1013,15 @@ class Browser:
             asyncio.create_task(cast(Coroutine, cb(url)))
 
     async def _on_session_ended(self, msg: dict[str, Any]) -> None:
-        reason = msg.get("reason", "completed")
-        self._ended_reason = reason
+        if self._ended.is_set():
+            # A terminal error (e.g. -1011 heartbeat_timeout) already ended the
+            # session with a precise reason. A later bare session_ended without
+            # an explicit reason must not clobber it with a generic "completed".
+            if msg.get("reason"):
+                self._ended_reason = msg["reason"]
+        else:
+            self._ended_reason = msg.get("reason", "completed")
+        reason = self._ended_reason
         if reason == "provider_disconnected":
             exc: Exception = ProviderDisconnected()
         else:
