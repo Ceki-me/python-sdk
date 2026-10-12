@@ -18,6 +18,7 @@ Protocol (mirrors front useWebRTCP2P.js):
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -29,6 +30,28 @@ log = logging.getLogger(__name__)
 
 # SDP fingerprint extraction regex (mirrors front extractFingerprint)
 _FINGERPRINT_RE = re.compile(r"a=fingerprint:(sha-\d+) (\S+)", re.IGNORECASE)
+
+
+def _is_public_candidate(cdp_candidate: str) -> bool:
+    """True if the ICE candidate is a public / routable address.
+
+    With TURN-only ICE (policy relay) outbound data goes through the relay,
+    but aiortc still surfaces private host candidates (10.x, 172.16-31.x,
+    192.168.x, 169.254.x). Sending those through the relay makes coturn reject
+    the CREATE_PERMISSION / CHANNEL_BIND with 403 Forbidden IP (private peer).
+    Skip them — keep only srflx/relay (public) candidates, matching the
+    browser-extension ``isPrivateIceCandidate`` filter on the provider side.
+    """
+    if not cdp_candidate:
+        return False
+    try:
+        ip = cdp_candidate.split()[4]
+    except (IndexError, ValueError):
+        return False
+    try:
+        return not ipaddress.ip_address(ip).is_private
+    except ValueError:
+        return False
 
 
 def _parse_ice_candidate(
@@ -235,6 +258,9 @@ class WebRTCTransport:
         async def _on_ice(candidate: Any) -> None:
             if candidate is None:
                 # ICE gathering complete
+                return
+            if not _is_public_candidate(candidate.candidate):
+                log.debug("webrtc: skipping private ICE candidate: %s", (candidate.candidate or "")[:80])
                 return
             if self.on_ice_candidate:
                 await self.on_ice_candidate({
@@ -517,6 +543,13 @@ class WebRTCTransport:
         # _parse_ice_candidate imports aiortc itself (and raises a clear
         # ImportError when aiortc is missing), so no local import is needed.
         raw_candidate = candidate.get("candidate", "")
+        # Drop REMOTE private candidates too (docker gw / host-net). Adding
+        # them makes aiortc send data to a 172.x peer through the TURN relay,
+        # which coturn rejects with 403 Forbidden IP (private peer) — the
+        # failure mode seen in multi-rent TURN (CREATE_PERMISSION / CHANNEL_BIND).
+        if not _is_public_candidate(raw_candidate):
+            log.debug("webrtc: skipping private REMOTE ICE candidate: %s", raw_candidate[:80])
+            return
         cand = _parse_ice_candidate(
             raw_candidate,
             sdp_mid=candidate.get("sdp_mid"),
