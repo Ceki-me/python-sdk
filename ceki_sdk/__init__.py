@@ -23,7 +23,7 @@ from ._provider import ProviderError, run_provider
 from ._vault import BrowserVault, ClientVault, VaultSession
 from .humanize import HumanProfile
 
-__version__ = "2.37.1"
+__version__ = "2.37.3"
 __all__ = [
     "connect",
     "ConnectOptions",
