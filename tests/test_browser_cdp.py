@@ -18,7 +18,9 @@ async def _do_rent(client, mock_relay, session_id="sess-1", schedule_id=42):
     server_event_id = "ev-test-1"
 
     async def ack_rent():
-        await asyncio.sleep(0.05)
+        # Wait for the rent message to reach the relay before replying — the
+        # future is only registered once {type: rent} arrives (3.10/3.11 flake).
+        await mock_relay.wait_for_message("rent")
         await mock_relay.send_to_all({"type": "rent_pending", "event_id": server_event_id})
         await asyncio.sleep(0.05)
         await mock_relay.send_to_all({

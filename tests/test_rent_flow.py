@@ -21,7 +21,9 @@ async def test_rent_resolves_via_rent_pending_then_match(mock_relay: MockRelaySe
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
     rent_task = asyncio.create_task(client.rent(schedule_id=240))
-    await asyncio.sleep(0.05)
+    # Wait for the rent message to reach the relay before replying — the future
+    # is only registered once {type: rent} arrives (avoids 3.10/3.11 flake).
+    await mock_relay.wait_for_message("rent")
 
     # Relay sends rent_pending with server-assigned event_id
     await mock_relay.send_to_all({"type": "rent_pending", "event_id": "1924", "schedule_id": 240})
@@ -56,7 +58,9 @@ async def test_rent_error_with_event_id_raises_exception(mock_relay: MockRelaySe
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
     rent_task = asyncio.create_task(client.rent(schedule_id=240))
-    await asyncio.sleep(0.05)
+    # Wait for the rent message to reach the relay before replying — the future
+    # is only registered once {type: rent} arrives (avoids 3.10/3.11 flake).
+    await mock_relay.wait_for_message("rent")
 
     await mock_relay.send_to_all({"type": "rent_pending", "event_id": "777", "schedule_id": 240})
     await asyncio.sleep(0.05)
@@ -83,7 +87,9 @@ async def test_rent_early_error_without_event_id_raises_exception(
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
     rent_task = asyncio.create_task(client.rent(schedule_id=240))
-    await asyncio.sleep(0.05)
+    # Wait for the rent message to reach the relay before replying — the future
+    # is only registered once {type: rent} arrives (avoids 3.10/3.11 flake).
+    await mock_relay.wait_for_message("rent")
 
     # Early error before rent_pending (e.g. rate limit) — no event_id
     await mock_relay.send_to_all({
@@ -107,7 +113,9 @@ async def test_rent_main_mode_forwards_mode_in_ws_message(mock_relay: MockRelayS
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
     rent_task = asyncio.create_task(client.rent(schedule_id=240, mode="main"))
-    await asyncio.sleep(0.05)
+    # Wait for the rent message to reach the relay before replying — the future
+    # is only registered once {type: rent} arrives (avoids 3.10/3.11 flake).
+    await mock_relay.wait_for_message("rent")
 
     await mock_relay.send_to_all({"type": "rent_pending", "event_id": "m1", "schedule_id": 240})
     await asyncio.sleep(0.05)
@@ -135,7 +143,9 @@ async def test_rent_with_fingerprint_dict_sends_configure(mock_relay: MockRelayS
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
     rent_task = asyncio.create_task(client.rent(schedule_id=240, fingerprint=SAMPLE_FINGERPRINT))
-    await asyncio.sleep(0.05)
+    # Wait for the rent message to reach the relay before replying — the future
+    # is only registered once {type: rent} arrives (avoids 3.10/3.11 flake).
+    await mock_relay.wait_for_message("rent")
 
     await mock_relay.send_to_all({"type": "rent_pending", "event_id": "fp1", "schedule_id": 240})
     await asyncio.sleep(0.05)
@@ -168,7 +178,9 @@ async def test_rent_with_fingerprint_false_sends_configure_false(
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
     rent_task = asyncio.create_task(client.rent(schedule_id=240, fingerprint=False))
-    await asyncio.sleep(0.05)
+    # Wait for the rent message to reach the relay before replying — the future
+    # is only registered once {type: rent} arrives (avoids 3.10/3.11 flake).
+    await mock_relay.wait_for_message("rent")
 
     await mock_relay.send_to_all({"type": "rent_pending", "event_id": "fp2", "schedule_id": 240})
     await asyncio.sleep(0.05)
@@ -197,7 +209,9 @@ async def test_rent_with_fingerprint_true_no_configure(mock_relay: MockRelayServ
     client = await connect("testkey", ConnectOptions(relay_url=url))
 
     rent_task = asyncio.create_task(client.rent(schedule_id=240, fingerprint=True))
-    await asyncio.sleep(0.05)
+    # Wait for the rent message to reach the relay before replying — the future
+    # is only registered once {type: rent} arrives (avoids 3.10/3.11 flake).
+    await mock_relay.wait_for_message("rent")
 
     await mock_relay.send_to_all({"type": "rent_pending", "event_id": "fp3", "schedule_id": 240})
     await asyncio.sleep(0.05)
@@ -244,7 +258,9 @@ async def test_rent_with_subscription_resolves_browser_then_rents(
 
     with patch("httpx.AsyncClient.post", mock_post):
         rent_task = asyncio.create_task(client.rent(subscription_id=709))
-        await asyncio.sleep(0.05)
+        # Wait for the rent message (after the REST resolve) to reach the relay
+        # before replying — the future is only registered once it arrives.
+        await mock_relay.wait_for_message("rent")
         await mock_relay.send_to_all(
             {"type": "rent_pending", "event_id": "sub1", "schedule_id": 42306}
         )

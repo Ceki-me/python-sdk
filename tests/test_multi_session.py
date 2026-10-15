@@ -11,36 +11,26 @@ from ceki_sdk import ConnectOptions, connect
 async def test_two_sessions_routed_independently(mock_relay):
     url = f"ws://127.0.0.1:{mock_relay.port}/ws/agent"
     client = await connect("test-key", ConnectOptions(relay_url=url))
-    acked: set[str] = set()
 
     async def ack_rent(session_id: str, schedule_id: int) -> None:
-        deadline = asyncio.get_event_loop().time() + 5
-        while asyncio.get_event_loop().time() < deadline:
-            await asyncio.sleep(0.05)
-            rent = next(
-                (m for m in mock_relay.received
-                 if m.get("type") == "rent" and m.get("browser_id") == schedule_id
-                 and schedule_id not in acked),
-                None,
-            )
-            if rent:
-                acked.add(schedule_id)
-                ev_id = f"ev-{session_id}"
-                await mock_relay.send_to_all({
-                    "type": "rent_pending",
-                    "event_id": ev_id,
-                    "schedule_id": schedule_id,
-                })
-                await asyncio.sleep(0.02)
-                await mock_relay.send_to_all({
-                    "type": "match",
-                    "event_id": ev_id,
-                    "session_id": session_id,
-                    "schedule_id": schedule_id,
-                    "chat_topic_id": None,
-                    "browser_info": {},
-                })
-                return
+        # Wait for this schedule's rent message before replying — deterministic
+        # across Python versions (the future only exists once {type: rent} lands).
+        await mock_relay.wait_for_message("rent", browser_id=schedule_id)
+        ev_id = f"ev-{session_id}"
+        await mock_relay.send_to_all({
+            "type": "rent_pending",
+            "event_id": ev_id,
+            "schedule_id": schedule_id,
+        })
+        await asyncio.sleep(0.02)
+        await mock_relay.send_to_all({
+            "type": "match",
+            "event_id": ev_id,
+            "session_id": session_id,
+            "schedule_id": schedule_id,
+            "chat_topic_id": None,
+            "browser_info": {},
+        })
 
     t1 = asyncio.create_task(ack_rent("sess-1", 1))
     t2 = asyncio.create_task(ack_rent("sess-2", 2))
@@ -96,7 +86,7 @@ async def test_close_one_session_leaves_other_alive(mock_relay):
     client = await connect("test-key", ConnectOptions(relay_url=url))
 
     async def ack_rent(session_id):
-        await asyncio.sleep(0.05)
+        await mock_relay.wait_for_message("rent", browser_id=1)
         ev_id = f"ev-{session_id}"
         await mock_relay.send_to_all({
             "type": "rent_pending",

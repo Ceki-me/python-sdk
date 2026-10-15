@@ -34,7 +34,9 @@ async def _setup_browser(mock_relay: MockRelayServer):
         ConnectOptions(relay_url=url, api_url="http://localhost:9999"),
     )
     rent_task = asyncio.create_task(client.rent(schedule_id=42))
-    await asyncio.sleep(0.05)
+    # Wait for the rent message to actually reach the relay before replying —
+    # otherwise the future is not yet registered and match gets dropped.
+    await mock_relay.wait_for_message("rent")
     await mock_relay.send_to_all({"type": "rent_pending", "event_id": "500", "schedule_id": 42})
     await asyncio.sleep(0.05)
     await mock_relay.send_to_all({
