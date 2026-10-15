@@ -27,7 +27,7 @@ from ._exceptions import (
     RateLimitExceeded,
     SessionEnded,
 )
-from ._models import Match, Snapshot, DownloadMeta, DownloadChunk
+from ._models import Match, Snapshot
 
 log = logging.getLogger(__name__)
 
