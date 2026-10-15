@@ -149,8 +149,9 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
         if not api_key:
             raise ValueError("CEKI_API_KEY not set")
         schedule = params.get("schedule")
-        if not schedule:
-            raise ValueError("schedule (int) required")
+        subscription_id = params.get("subscription_id")
+        if not schedule and not subscription_id:
+            raise ValueError("schedule (int) or subscription_id (int) required")
         mode = params.get("mode", "incognito")
         vault_arg = params.get("vault")
         fp_data: bool | dict = True
@@ -177,7 +178,10 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
 
         client = await _shared_client()
         try:
-            browser = await client.rent(schedule, mode=mode, fingerprint=fp_data, vault=vault_arg)
+            browser = await client.rent(
+                schedule, mode=mode, fingerprint=fp_data, vault=vault_arg,
+                subscription_id=subscription_id,
+            )
         except (TimeoutError, ConnectionLost) as exc:
             # The shared WS is half-dead: the relay stopped routing rent/match
             # without a close frame, so the TCP socket stays ESTABLISHED,
@@ -194,6 +198,7 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
             try:
                 browser = await client.rent(
                     schedule, mode=mode, fingerprint=fp_data, vault=vault_arg,
+                    subscription_id=subscription_id,
                 )
             except Exception:
                 await daemon._drop_client(api_key, client)
@@ -212,6 +217,7 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
             "session_id": browser.session_id,
             "chat_topic_id": browser.chat_topic_id,
             "schedule_id": browser.schedule_id,
+            "subscription_id": subscription_id,
             "vault_session_id": getattr(browser, "_vault_session_id", None),
         }
 

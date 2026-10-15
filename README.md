@@ -185,6 +185,45 @@ async with await client.rent(schedule_id) as browser:
 - Encrypt the blob before writing to disk if it contains sensitive credentials.
 - `import_()` raises `ValueError` on `schema_version` mismatch (future-proofing).
 
+## CloudBrowser subscriptions ($5/mo)
+
+A **CloudBrowser subscription** is a paid browser-group subscription (type 3)
+that grants the owner's agents rent access to that group's real browsers at
+**$0/min** (the owner already paid the monthly fee). Sessions under a
+subscription are always **incognito** — subscription browsers have no "main"
+profile.
+
+**`client.my_browsers()`** returns both your pre-arranged rent contracts
+(`browsers`) and the owner's subscriptions (`subscriptions`), each with its
+group and member browsers:
+
+```python
+result = await client.my_browsers()
+for sub in result.subscriptions:
+    print(sub.subscription_id, sub.group.label, sub.geo_key, sub.expires_at)
+    for b in sub.browsers:
+        print("  ", b.browser_id, b.name, "online" if b.online else "offline")
+```
+
+**`client.rent(subscription_id=...)`** rents a free browser from the
+subscription's group — the backend picks the currently free browser:
+
+```python
+browser = await client.rent(subscription_id=709)
+```
+
+**`client.subscription`** — discover groups and buy a subscription
+(requires an agent `ag_` key; same MCP endpoint as `ceki contract`):
+
+```python
+groups = await client.subscription.list_groups()      # {groups: [{group_id, plans, geo}]}
+result = await client.subscription.subscribe(1, plan_key="30days", geo_key="ru")
+print(result["subscription_id"], result["payment_mode"])  # invoice → pay to activate
+```
+
+The same flows are exposed on the CLI (`ceki my-browsers`, `ceki rent
+--subscription ID`, `ceki subscribe [GROUP_ID] --plan KEY --geo KEY`).
+
 ## Browser Vault (server-stored sessions)
 
 The **vault** stores a browser snapshot (cookies + per-origin localStorage/sessionStorage + fingerprint) on the Ceki API (`/api/vault/sessions`, encrypted server-side) so you can restore it on a **different** browser later — the same session profile across machines.
@@ -342,8 +381,10 @@ The CLI persists session state locally — after `rent` it saves the session ID 
 | Command | Description |
 |---|---|
 | `search [--limit N] [--filter K=V]…` | List available browsers |
-| `my-browsers` | List browsers with pre-arranged rent contracts |
+| `my-browsers` | List pre-arranged rent contracts + the owner's CloudBrowser subscriptions |
 | `rent --schedule ID [--mode incognito\|main] [--fingerprint-from FILE] [--vault SESSION_ID]` | Rent a browser |
+| `rent --subscription SUB_ID` | Rent a free browser ($0/min) from a CloudBrowser subscription's group |
+| `subscribe [GROUP_ID] [--plan PLAN_KEY] [--geo GEO_KEY]` | List browser groups with plans/geo, or buy a CloudBrowser subscription |
 | `sessions [--all] [--limit N] [--json]` | List your sessions |
 | `stop SID` | End a session |
 | `wait SID` | Block until the session ends |

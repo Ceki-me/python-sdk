@@ -29,7 +29,7 @@ from ._models import BrowserOption, Match
 from ._webrtc import WebRTCTransport
 
 if TYPE_CHECKING:
-    from ._models import SessionInfo
+    from ._models import MyBrowsers, SessionInfo
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +76,10 @@ class Client:
         # Vault HTTP surface (see ceki_sdk/_vault.py)
         from ._vault import ClientVault
         self.vault = ClientVault(self)
+
+        # CloudBrowser subscription HTTP surface (see ceki_sdk/_subscription.py)
+        from ._subscription import ClientSubscription
+        self.subscription = ClientSubscription(self)
 
         # P2P WebRTC transport (primary, WS = fallback)
         self._p2p: WebRTCTransport | None = None
@@ -178,7 +182,16 @@ class Client:
         items = data.get("data", data) if isinstance(data, dict) else data
         return [SessionInfo.model_validate(x) for x in items]
 
-    async def my_browsers(self) -> list[BrowserOption]:
+    async def my_browsers(self) -> "MyBrowsers":
+        """List the agent's pre-arranged rent contracts AND the owner's
+        CloudBrowser subscriptions.
+
+        ``/api/agent/browsers`` returns ``{data: [BrowserOption...],
+        subscriptions: [SubscriptionInfo...]}``. The subscriptions are the
+        agent's owner's paid browser-group subscriptions (type 3) — renting
+        via ``subscription_id`` gives a free browser ($0/min) from the group.
+        """
+        from ._models import MyBrowsers
         url = f"{self.api_url}/api/agent/browsers"
         headers: dict[str, str] = {"Authorization": f"Bearer {self.api_key}"}
         if self._basic_auth:
@@ -190,12 +203,13 @@ class Client:
             resp = await http.get(url, headers=headers)
             resp.raise_for_status()
         data = resp.json()
-        items = data.get("browsers", data.get("data", data)) if isinstance(data, dict) else data
-        return [BrowserOption.model_validate(x) for x in items]
+        body = data if isinstance(data, dict) else {}
+        # The backend returns browsers under ``data``; MyBrowsers.browsers maps it.
+        return MyBrowsers.model_validate({"browsers": body.get("data", []), **body})
 
     async def rent(
         self,
-        schedule_id: int,
+        schedule_id: int | None = None,
         *,
         mode: str = "incognito",
         human="natural",
@@ -203,9 +217,24 @@ class Client:
         fingerprint: bool | dict | None = True,
         pacing_profile: str | None = None,
         vault: int | dict[str, Any] | None = None,
+        subscription_id: int | None = None,
     ) -> Browser:
+        if schedule_id is None and subscription_id is None:
+            raise ValueError("rent requires schedule_id or subscription_id")
         if mode not in ("incognito", "main"):
             raise ValueError(f"mode must be 'incognito' or 'main', got {mode!r}")
+
+        # CloudBrowser subscription rent: the backend resolves the currently
+        # free browser of the subscription's group and prices it at $0/min
+        # (the owner already paid the monthly fee). The relay's rent schema
+        # still requires browser_id, so resolve the free browser via the
+        # same REST call the frontend uses, then rent that browser WITH the
+        # subscription_id (the relay forwards both to POST /api/sessions,
+        # which re-uses the resolved Pending session and tags rent_price=0).
+        if subscription_id is not None:
+            schedule_id = await self._resolve_subscription_browser(subscription_id)
+            mode = "incognito"  # subscription browsers have no main profile
+
         fut: asyncio.Future[Match] = asyncio.get_event_loop().create_future()
         self._pending_rent_queue.append(fut)
         msg: dict = {"type": "rent", "browser_id": schedule_id}
@@ -213,6 +242,8 @@ class Client:
             msg["mode"] = mode
         if pacing_profile is not None:
             msg["pacing_profile"] = pacing_profile
+        if subscription_id is not None:
+            msg["subscription_id"] = subscription_id
         await self._ws_send(msg)
         try:
             match = await asyncio.wait_for(fut, timeout=90)
@@ -346,6 +377,48 @@ class Client:
     # ──────────────────────────────────────────────────────────────────────────
     # Internal helpers
     # ──────────────────────────────────────────────────────────────────────────
+
+    async def _resolve_subscription_browser(self, subscription_id: int) -> int:
+        """Resolve the currently free browser of a CloudBrowser subscription.
+
+        Mirrors the frontend flow: ``POST /api/sessions {subscription_id}``
+        picks a free browser from the subscription's group (backend decides),
+        creates a Pending session and returns ``schedule_id``. That schedule is
+        then rented over the relay with ``subscription_id`` forwarded, so the
+        backend re-uses the Pending session and tags it ``rent_price=0``.
+
+        Raises ``CekiError`` with the backend message on failure (403
+        subscription_not_allowed, 409 busy/parallel-limit, …).
+        """
+        url = f"{self.api_url}/api/sessions"
+        headers: dict[str, str] = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        if self._basic_auth:
+            import base64
+            raw = f"{self._basic_auth[0]}:{self._basic_auth[1]}"
+            creds = base64.b64encode(raw.encode()).decode()
+            headers["X-Basic-Auth"] = f"Basic {creds}"
+        async with httpx.AsyncClient() as http:
+            resp = await http.post(
+                url, headers=headers,
+                json={"subscription_id": int(subscription_id), "mode": "incognito"},
+            )
+        if resp.status_code not in (200, 201):
+            msg = resp.text[:400]
+            try:
+                body = resp.json()
+                if isinstance(body, dict) and body.get("message"):
+                    msg = body["message"]
+            except Exception:
+                pass
+            raise CekiError(f"subscription rent failed ({resp.status_code}): {msg}")
+        body = resp.json()
+        schedule_id = body.get("schedule_id") if isinstance(body, dict) else None
+        if not schedule_id:
+            raise CekiError(f"subscription rent: backend returned no schedule_id: {body!r}")
+        return int(schedule_id)
 
     async def _ws_send(self, msg: dict[str, Any]) -> None:
         if self._ws is None:
