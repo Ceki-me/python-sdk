@@ -8,7 +8,11 @@ from ceki_sdk import ConnectOptions, connect
 
 
 @pytest.mark.asyncio
-async def test_two_sessions_routed_independently(mock_relay):
+async def test_two_sessions_routed_independently(mock_relay, monkeypatch):
+    # This test exercises multi-session routing over WS, not WebRTC — force the
+    # WS transport so the P2P init timeout (15s per rent) can't race the test
+    # on slower runners (CI flake on 3.10/3.12).
+    monkeypatch.setenv("CEKI_FORCE_WS", "1")
     url = f"ws://127.0.0.1:{mock_relay.port}/ws/agent"
     client = await connect("test-key", ConnectOptions(relay_url=url))
 
