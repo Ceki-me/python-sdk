@@ -13,6 +13,14 @@ from .conftest import MockRelayServer
 MOCK_EVENT_STORE_RESPONSE = {"id": 9001, "status_id": 100}
 
 
+@pytest.fixture(autouse=True)
+def _force_ws_transport(monkeypatch):
+    """These tests exercise WS rent + chat-action flow, not WebRTC. Force the
+    WS transport so the P2P init wait (15s) after match can't race the test's
+    5s rent timeout on slower runners (3.11 CI flake: rent cancelled)."""
+    monkeypatch.setenv("CEKI_FORCE_WS", "1")
+
+
 def _patch_httpx_post(status_code=200, json_body=None):
     resp = MagicMock()
     resp.status_code = status_code
@@ -34,7 +42,9 @@ async def _setup_browser(mock_relay: MockRelayServer):
         ConnectOptions(relay_url=url, api_url="http://localhost:9999"),
     )
     rent_task = asyncio.create_task(client.rent(schedule_id=42))
-    await asyncio.sleep(0.05)
+    # Wait for the rent message to actually reach the relay before replying —
+    # otherwise the future is not yet registered and match gets dropped.
+    await mock_relay.wait_for_message("rent")
     await mock_relay.send_to_all({"type": "rent_pending", "event_id": "500", "schedule_id": 42})
     await asyncio.sleep(0.05)
     await mock_relay.send_to_all({

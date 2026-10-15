@@ -103,3 +103,59 @@ class DownloadChunk(BaseModel):
     seq: int
     total: int
     payload: str
+
+
+class SubscriptionGroup(BaseModel):
+    """The browser group a CloudBrowser subscription covers (from
+    ``/api/agent/browsers`` → ``subscriptions[].group``)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    label: str | None = None
+    icon: str | None = None
+
+
+class SubscriptionBrowser(BaseModel):
+    """One browser in a subscription's group (from
+    ``/api/agent/browsers`` → ``subscriptions[].browsers[]``)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    browser_id: int
+    name: str | None = None
+    geo: str | None = None
+    browser_name: str | None = None
+    online: bool = False
+
+
+class SubscriptionInfo(BaseModel):
+    """A CloudBrowser (type 3) subscription of the agent's owner.
+
+    Renting by ``subscription_id`` gives a free browser ($0/min) from the
+    subscription's group — the owner already paid the monthly fee.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    subscription_id: int
+    type: str = "group_subscription"
+    group: SubscriptionGroup
+    browsers: list[SubscriptionBrowser] = []
+    plan_key: str | None = None
+    geo_key: str | None = None
+    expires_at: str | None = None
+
+
+class MyBrowsers(BaseModel):
+    """Composite result of ``/api/agent/browsers``.
+
+    ``browsers`` are the agent's pre-arranged rent contracts; ``subscriptions``
+    are the CloudBrowser (type 3) subscriptions of the agent's owner, each with
+    its group + member browsers ($0/min rent via subscription_id).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    browsers: list[BrowserOption] = []
+    subscriptions: list[SubscriptionInfo] = []

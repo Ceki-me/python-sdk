@@ -282,12 +282,16 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
     vault_arg: int | None = None
     if getattr(args, "vault", None):
         vault_arg = int(args.vault)
+    subscription_arg: int | None = None
+    if getattr(args, "subscription", None):
+        subscription_arg = int(args.subscription)
     try:
         ok, result = await _daemon_request("/rent", {
             "schedule": args.schedule,
             "mode": args.mode,
             "fingerprint_from": fp_from,
             "vault": vault_arg,
+            "subscription_id": subscription_arg,
         })
         if ok:
             sid = result["session_id"]
@@ -313,6 +317,7 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
     try:
         browser = await client.rent(
             args.schedule, mode=args.mode, fingerprint=fp_data, vault=vault_arg,
+            subscription_id=subscription_arg,
         )
         save_session(browser.session_id, {
             "session_id": browser.session_id,
@@ -324,6 +329,7 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
             "session_id": browser.session_id,
             "chat_topic_id": browser.chat_topic_id,
             "schedule_id": browser.schedule_id,
+            "subscription_id": subscription_arg,
             "vault_session_id": getattr(browser, "_vault_session_id", None),
         })
     finally:
@@ -905,10 +911,50 @@ async def _cmd_my_browsers(args: argparse.Namespace) -> None:
     client = await connect(api_key, _connect_options())
     try:
         results = await client.my_browsers()
-        _out([r.model_dump(mode="json") for r in results])
+        out: dict[str, Any] = {
+            "browsers": [r.model_dump(mode="json") for r in results.browsers],
+            "subscriptions": [s.model_dump(mode="json") for s in results.subscriptions],
+        }
+        _out(out)
     finally:
         if client._ws:
             await client.disconnect()
+
+
+async def _cmd_subscribe(args: argparse.Namespace) -> None:
+    """``ceki subscribe`` — list browser groups / buy a CloudBrowser subscription.
+
+    Goes through the ``create-browser-subscription`` MCP tool (``/mcp/agent``),
+    which requires an agent ``ag_`` API key (``CEKI_AGENT_TOKEN`` or
+    ``CEKI_API_KEY``). Listing is a call without ``group_id``; purchase is a
+    call with ``group_id + plan_key + geo_key``.
+    """
+    from .contract import _resolve_token
+    api_key = _resolve_token()
+    if not api_key:
+        _err("CEKI_AGENT_TOKEN or CEKI_API_KEY not set", "auth")
+        sys.exit(2)
+    opts = _connect_options()
+    from ._client import Client
+
+    client = Client(
+        api_key=api_key,
+        relay_url=opts.relay_url or "wss://browser.ceki.me/ws/agent",
+        api_url=opts.api_url or "https://api.ceki.me",
+        chat_url=opts.chat_url or "https://chat.ceki.me/api/chat",
+        reconnect=False,
+        basic_auth=opts.basic_auth,
+    )
+    if getattr(args, "group", None) is None:
+        groups = await client.subscription.list_groups()
+        _out({"groups": groups})
+        return
+    result = await client.subscription.subscribe(
+        int(args.group),
+        plan_key=getattr(args, "plan", None),
+        geo_key=getattr(args, "geo", None),
+    )
+    _out(result)
 
 
 async def _cmd_search(args: argparse.Namespace) -> None:
@@ -1435,7 +1481,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_rent = sub.add_parser("rent", help="Rent a browser")
-    p_rent.add_argument("--schedule", type=int, required=True, help="Schedule ID")
+    p_rent.add_argument("--schedule", type=int, help="Schedule ID")
+    p_rent.add_argument(
+        "--subscription", type=int, metavar="SUBSCRIPTION_ID",
+        help="CloudBrowser subscription ID — rent a free browser ($0/min) "
+             "from the subscription's group (owner already paid). Overrides "
+             "--schedule; the backend picks the free browser itself.",
+    )
     p_rent.add_argument(
         "--mode", choices=["incognito", "main"],
         default="incognito", help="Profile mode (default: incognito)",
@@ -1568,7 +1620,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_vd = vsub.add_parser("delete", help="Delete a vault session (owner only)")
     p_vd.add_argument("id", type=int, help="Vault session id")
 
-    sub.add_parser("my-browsers", help="List browsers with pre-arranged rent contracts")
+    sub.add_parser(
+        "my-browsers",
+        help="List browsers with pre-arranged rent contracts + CloudBrowser subscriptions",
+    )
+
+    p_subscribe = sub.add_parser(
+        "subscribe",
+        help="List browser groups / buy a CloudBrowser subscription (agent key)",
+    )
+    p_subscribe.add_argument("group", type=int, nargs="?", metavar="GROUP_ID",
+                             help="Group ID from the listing. Omit to list available groups "
+                                  "with their plans and geo options.")
+    p_subscribe.add_argument("--plan", dest="plan", metavar="PLAN_KEY",
+                             help="Plan key of the group, e.g. 30days / 180days / 360days "
+                                  "(required when GROUP_ID given)")
+    p_subscribe.add_argument("--geo", dest="geo", metavar="GEO_KEY",
+                             help="Geo key: ru / de / global (from the group geo options)")
 
     p_search = sub.add_parser("search", help="Search available browsers")
     p_search.add_argument("--limit", type=int, default=20, help="Max results")
@@ -1957,6 +2025,7 @@ def main() -> None:
         "sessions": _cmd_sessions,
         "vault": _cmd_vault,
         "my-browsers": _cmd_my_browsers,
+        "subscribe": _cmd_subscribe,
         "search": _cmd_search,
         "wait": _cmd_wait,
         "screenshot": _cmd_screenshot,

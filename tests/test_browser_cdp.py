@@ -7,6 +7,14 @@ import pytest
 from ceki_sdk import ConnectOptions, connect
 
 
+@pytest.fixture(autouse=True)
+def _force_ws_transport(monkeypatch):
+    """These tests exercise WS rent + CDP flow, not WebRTC. Force the WS
+    transport so the P2P init wait (15s) after match can't race the test's
+    rent on slower runners (3.11 CI flake)."""
+    monkeypatch.setenv("CEKI_FORCE_WS", "1")
+
+
 @pytest.fixture
 async def connected_client(mock_relay):
     client = await connect("test-key", ConnectOptions(relay_url=f"ws://127.0.0.1:{mock_relay.port}/ws/agent"))
@@ -18,7 +26,9 @@ async def _do_rent(client, mock_relay, session_id="sess-1", schedule_id=42):
     server_event_id = "ev-test-1"
 
     async def ack_rent():
-        await asyncio.sleep(0.05)
+        # Wait for the rent message to reach the relay before replying — the
+        # future is only registered once {type: rent} arrives (3.10/3.11 flake).
+        await mock_relay.wait_for_message("rent")
         await mock_relay.send_to_all({"type": "rent_pending", "event_id": server_event_id})
         await asyncio.sleep(0.05)
         await mock_relay.send_to_all({
@@ -42,9 +52,9 @@ async def test_cdp_happy_path(connected_client):
     browser = await _do_rent(client, mock_relay)
 
     async def send_cdp_response():
-        await asyncio.sleep(0.05)
-        cdp_msg = next((m for m in mock_relay.received if m.get("type") == "cdp"), None)
-        assert cdp_msg is not None
+        # Wait for the cdp request to reach the relay before replying — a bare
+        # sleep(0.05) loses the race on slower runners (3.11 CI flake).
+        cdp_msg = await mock_relay.wait_for_message("cdp")
         await mock_relay.send_to_all({
             "type": "cdp_response",
             "session_id": browser.session_id,
@@ -106,8 +116,9 @@ async def test_cdp_error_response(connected_client):
     browser = await _do_rent(client, mock_relay)
 
     async def send_error():
-        await asyncio.sleep(0.05)
-        cdp_msg = next((m for m in mock_relay.received if m.get("type") == "cdp"), None)
+        # Wait for the cdp request to reach the relay before replying — a bare
+        # sleep(0.05) loses the race on slower runners (3.11 CI flake).
+        cdp_msg = await mock_relay.wait_for_message("cdp")
         await mock_relay.send_to_all({
             "type": "cdp_response",
             "session_id": browser.session_id,
