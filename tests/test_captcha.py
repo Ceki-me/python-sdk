@@ -13,6 +13,14 @@ from .conftest import MockRelayServer
 MOCK_EVENT_STORE_RESPONSE = {"id": 9001, "status_id": 100}
 
 
+@pytest.fixture(autouse=True)
+def _force_ws_transport(monkeypatch):
+    """These tests exercise WS rent + chat-action flow, not WebRTC. Force the
+    WS transport so the P2P init wait (15s) after match can't race the test's
+    5s rent timeout on slower runners (3.11 CI flake: rent cancelled)."""
+    monkeypatch.setenv("CEKI_FORCE_WS", "1")
+
+
 def _patch_httpx_post(status_code=200, json_body=None):
     resp = MagicMock()
     resp.status_code = status_code

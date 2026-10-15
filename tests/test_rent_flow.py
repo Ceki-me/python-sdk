@@ -15,6 +15,14 @@ from tests.test_profile import SAMPLE_FINGERPRINT
 from .conftest import MockRelayServer
 
 
+@pytest.fixture(autouse=True)
+def _force_ws_transport(monkeypatch):
+    """These tests exercise WS rent flow, not WebRTC. Force the WS transport
+    so the P2P init wait (15s) after match can't race the test's rent timeout
+    on slower runners (3.11 CI flake)."""
+    monkeypatch.setenv("CEKI_FORCE_WS", "1")
+
+
 @pytest.mark.asyncio
 async def test_rent_resolves_via_rent_pending_then_match(mock_relay: MockRelayServer) -> None:
     url = f"ws://127.0.0.1:{mock_relay.port}"
