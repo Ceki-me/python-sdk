@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ceki_sdk._browser import Browser
-from ceki_sdk._models import DownloadChunk, DownloadMeta, Match
+from ceki_sdk._models import Match
 
 
 def _make_browser() -> tuple[Browser, MagicMock]:

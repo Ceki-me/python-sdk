@@ -260,7 +260,10 @@ class WebRTCTransport:
                 # ICE gathering complete
                 return
             if not _is_public_candidate(candidate.candidate):
-                log.debug("webrtc: skipping private ICE candidate: %s", (candidate.candidate or "")[:80])
+                log.debug(
+                    "webrtc: skipping private ICE candidate: %s",
+                    (candidate.candidate or "")[:80],
+                )
                 return
             if self.on_ice_candidate:
                 await self.on_ice_candidate({

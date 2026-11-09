@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -51,6 +52,33 @@ class MockRelayServer:
     async def send_to_all(self, msg: dict[str, Any]) -> None:
         for ws in list(self.connections):
             await ws.send(json.dumps(msg))
+
+    async def wait_for_message(
+        self, msg_type: str, timeout: float = 5.0, **match: Any,
+    ) -> dict[str, Any]:
+        """Wait until the client's WS message of ``msg_type`` is received.
+
+        ``match`` narrows the search (e.g. ``browser_id=1``); the first message
+        matching ``type`` + all ``match`` fields wins.
+
+        Replaces bare ``asyncio.sleep(0.05)`` before replying with
+        ``rent_pending``/``match``: the client's ``rent()`` registers its
+        future only after its ``{type: rent}`` actually reaches this server, so
+        replying before then loses the future (the ``match`` is dropped and the
+        rent stalls to its 90s timeout — the 3.10/3.11 CI flake). Polling
+        ``received`` makes the test deterministic across Python versions.
+        """
+        deadline = asyncio.get_event_loop().time() + timeout
+        while asyncio.get_event_loop().time() < deadline:
+            for m in self.received:
+                if m.get("type") == msg_type and all(
+                    m.get(k) == v for k, v in match.items()
+                ):
+                    return m
+            await asyncio.sleep(0.01)
+        raise AssertionError(
+            f"timed out waiting for WS message type={msg_type!r} match={match!r}"
+        )
 
     async def stop(self) -> None:
         if self._server:
