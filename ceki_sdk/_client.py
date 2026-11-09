@@ -888,10 +888,10 @@ class Client:
         # Signal _p2p_ready only when DC is actually usable — rent() waits on this
         # and Browser.send() skips the 30s wait_dc_open() timeout for the first CDP.
         try:
-            await asyncio.wait_for(transport.wait_dc_open(), timeout=15.0)
+            await asyncio.wait_for(transport.wait_dc_open(), timeout=35.0)
             self._p2p_ready.set()
         except asyncio.TimeoutError:
-            log.warning("p2p: DC not open within 15s — P2P disabled, WS fallback")
+            log.warning("p2p: DC not open within 35s — P2P disabled, WS fallback")
             await transport.close()
             self._p2p = None
 
@@ -1004,10 +1004,10 @@ class Client:
 
         # Wait for DC to open after answer was sent (DC was created inside create_answer).
         try:
-            await asyncio.wait_for(transport.wait_dc_open(), timeout=15.0)
+            await asyncio.wait_for(transport.wait_dc_open(), timeout=35.0)
             self._p2p_ready.set()
         except asyncio.TimeoutError:
-            log.warning("p2p: DC not open within 15s — P2P disabled, WS fallback")
+            log.warning("p2p: DC not open within 35s — P2P disabled, WS fallback")
             await transport.close()
             self._p2p = None
 
