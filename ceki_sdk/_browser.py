@@ -19,6 +19,7 @@ from .humanize import Humanizer, HumanProfile
 if TYPE_CHECKING:
     from ._client import Client
 from ._captcha import CaptchaResult
+from ._captcha_solver import SolvedCaptcha
 from ._exceptions import (
     CaptchaTimeoutError,
     CdpUnrecoverable,
@@ -963,6 +964,86 @@ class Browser:
                 )
         except Exception as exc:
             log.warning("expire captcha event %d failed: %s", child_event_id, exc)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Automated captcha solving (opt-in, agent-side API key)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def solve_captcha(
+        self,
+        *,
+        website_url: str | None = None,
+        timeout: float = 180.0,
+        poll_interval: float = 5.0,
+    ) -> "SolvedCaptcha":
+        """Automatically solve an hCaptcha / reCAPTCHA widget on the current page.
+
+        Opt-in: requires ``CEKI_2CAPTCHA_API_KEY`` (or the legacy
+        ``TWOCAPTCHA_API_KEY``) in the agent environment. When the key is
+        absent this raises :class:`CaptchaError` — use the human
+        :meth:`request_captcha` flow instead.
+
+        Flow:
+          1. Detect a captcha widget on the page (``Runtime.evaluate``).
+          2. Create a ``HCaptchaTaskProxyless`` / ``RecaptchaV3TaskProxyless``
+             task at 2captcha with the widget's site key.
+          3. Poll until the solver returns a token.
+          4. Inject the token back into the widget and submit the form.
+
+        ``website_url`` overrides the page URL sent to the solver (some sites
+        bind the token to a canonical URL); defaults to the current page's
+        ``location.href`` read via CDP.
+
+        Returns :class:`SolvedCaptcha` — never raises for a solve that merely
+        times out, but a hard API error (bad key, empty balance) raises
+        :class:`CaptchaError`.
+        """
+        from ._captcha_solver import CaptchaSolver, detect_captcha, inject_solution
+
+        solver = CaptchaSolver(
+            poll_timeout=timeout,
+            poll_interval=poll_interval,
+        )  # raises CaptchaError if no key in env
+
+        detected = await detect_captcha(self)
+        if not detected.get("found"):
+            return SolvedCaptcha(
+                solved=False,
+                task_type="",
+                error=f"no captcha widget detected: {detected.get('error', '')}",
+            )
+
+        task_type = (
+            "HCaptchaTaskProxyless"
+            if detected.get("type") == "hcaptcha"
+            else "RecaptchaV3TaskProxyless"
+        )
+
+        if not website_url:
+            loc = await self.send({
+                "method": "Runtime.evaluate",
+                "params": {
+                    "expression": "location.href",
+                    "returnByValue": True,
+                },
+            })
+            website_url = loc.get("result", {}).get("value") or ""
+
+        result = await solver.solve(
+            task_type=task_type,
+            website_url=website_url,
+            website_key=detected.get("key", ""),
+        )
+        if not result.solved:
+            return result
+
+        inject = await inject_solution(self, task_type, result.token)
+        if not inject.get("injected") and not inject.get("hasResponse"):
+            log.warning(
+                "solve_captcha: token injected but widget did not confirm: %s",
+                inject,
+            )
+        return result
 
     # ──────────────────────────────────────────────────────────────────────────
     # Internal dispatch (called from Client._reader_loop)
