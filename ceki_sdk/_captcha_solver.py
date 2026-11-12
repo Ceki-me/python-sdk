@@ -34,8 +34,16 @@ log = logging.getLogger(__name__)
 CREATE_TASK_URL = "https://api.2captcha.com/createTask"
 GET_TASK_URL = "https://api.2captcha.com/getTaskResult"
 
-# 2captcha task types we can solve.
-CaptchaType = Literal["HCaptchaTaskProxyless", "RecaptchaV3TaskProxyless"]
+# 2captcha task types we can solve. Proxyless variants run on the service's
+# datacenter IPs; the proxied variants are used when CEKI_2CAPTCHA_PROXY_URL is
+# set so workers reach the target from a residential/geo IP (some anti-bot
+# scoring refuses tokens minted from datacenter ranges).
+CaptchaType = Literal[
+    "HCaptchaTaskProxyless",
+    "HCaptchaTask",
+    "RecaptchaV3TaskProxyless",
+    "RecaptchaV3Task",
+]
 
 # Default poll budget (seconds) for a single task. A normal hCaptcha solves in
 # ~10-40s; give it a generous cap but fail fast rather than hang the agent.
@@ -56,6 +64,16 @@ def _api_key_from_env() -> str:
     return os.environ.get("CEKI_2CAPTCHA_API_KEY") or os.environ.get(
         "TWOCAPTCHA_API_KEY", ""
     ).strip()
+
+
+def _proxy_from_env() -> str:
+    """Return the optional worker-proxy URL from ``CEKI_2CAPTCHA_PROXY_URL``.
+
+    When set, solving tasks are submitted with the *proxied* task type and the
+    proxy is attached to the payload, so 2captcha workers reach the target
+    from that egress (residential/geo IPs pass stricter anti-bot scoring).
+    """
+    return os.environ.get("CEKI_2CAPTCHA_PROXY_URL", "").strip()
 
 
 @dataclass
@@ -100,6 +118,7 @@ class CaptchaSolver:
         get_url: str = GET_TASK_URL,
         poll_timeout: float = DEFAULT_POLL_TIMEOUT,
         poll_interval: float = DEFAULT_POLL_INTERVAL,
+        proxy: str | None = None,
     ) -> None:
         self._api_key = (api_key or _api_key_from_env()).strip()
         if not self._api_key:
@@ -111,6 +130,41 @@ class CaptchaSolver:
         self._get_url = get_url
         self._poll_timeout = poll_timeout
         self._poll_interval = poll_interval
+        # Proxy URL for the solver workers (``http://user:pass@host:port``).
+        # Defaults to CEKI_2CAPTCHA_PROXY_URL; empty = Proxyless tasks.
+        self._proxy = (proxy if proxy is not None else _proxy_from_env()).strip()
+
+    @staticmethod
+    def _proxy_payload(proxy: str) -> dict[str, Any]:
+        """Split ``http://user:pass@host:port`` into the 2captcha proxy fields.
+
+        2captcha wants the parts separately (proxyType, proxyAddress,
+        proxyPort, proxyLogin, proxyPassword) — never a full URL.
+        """
+        import urllib.parse
+
+        url = proxy if "://" in proxy else f"http://{proxy}"
+        parsed = urllib.parse.urlsplit(url)
+        scheme = (parsed.scheme or "http").lower()
+        type_map = {"http": "http", "https": "https", "socks5": "socks5"}
+        host = parsed.hostname or ""
+        port = parsed.port or (3128 if scheme in ("http", "https") else 1080)
+        payload = {
+            "proxyType": type_map.get(scheme, "http"),
+            "proxyAddress": host,
+            "proxyPort": int(port),
+        }
+        if parsed.username:
+            payload["proxyLogin"] = urllib.parse.unquote(parsed.username)
+        if parsed.password:
+            payload["proxyPassword"] = urllib.parse.unquote(parsed.password)
+        return payload
+
+    def _task_type(self, base: str) -> str:
+        """Proxyless task type unless a worker proxy is configured."""
+        if self._proxy:
+            return base.replace("Proxyless", "")
+        return base
 
     async def _create_task(self, client: httpx.AsyncClient, payload: dict[str, Any]) -> str:
         body = {"clientKey": self._api_key, "task": payload}
@@ -149,11 +203,16 @@ class CaptchaSolver:
         A hard API error (bad key, empty balance) raises :class:`CaptchaError`.
         """
         started = time.monotonic()
+        # The type actually sent to 2captcha (proxied when a worker proxy is
+        # configured) — this is what we report back on the result.
+        effective_type = self._task_type(task_type)
         payload: dict[str, Any] = {
-            "type": task_type,
+            "type": effective_type,
             "websiteURL": website_url,
             "websiteKey": website_key,
         }
+        if self._proxy:
+            payload.update(self._proxy_payload(self._proxy))
         if extra:
             payload.update(extra)
 
@@ -166,7 +225,7 @@ class CaptchaSolver:
                 if remaining <= 0:
                     return SolvedCaptcha(
                         solved=False,
-                        task_type=task_type,
+                        task_type=effective_type,
                         error="2captcha poll timeout",
                         elapsed=time.monotonic() - started,
                     )
@@ -178,14 +237,14 @@ class CaptchaSolver:
                     if not token:
                         return SolvedCaptcha(
                             solved=False,
-                            task_type=task_type,
+                            task_type=effective_type,
                             error=f"2captcha ready but no token in solution: {solution}",
                             elapsed=time.monotonic() - started,
                             solver_response=data,
                         )
                     return SolvedCaptcha(
                         solved=True,
-                        task_type=task_type,
+                        task_type=effective_type,
                         token=token,
                         elapsed=time.monotonic() - started,
                         solver_response=data,
@@ -201,7 +260,7 @@ class CaptchaSolver:
                         continue
                     return SolvedCaptcha(
                         solved=False,
-                        task_type=task_type,
+                        task_type=effective_type,
                         error=f"2captcha error {err}: {data.get('error_description', '')[:200]}",
                         elapsed=time.monotonic() - started,
                         solver_response=data,
@@ -225,10 +284,20 @@ _DETECT_JS = r"""
     if (hc && hc.getAttribute('data-sitekey')) {
       return JSON.stringify({found: true, type: 'hcaptcha', key: hc.getAttribute('data-sitekey')});
     }
-    const hcIframe = document.querySelector('iframe[src*="hcaptcha.com"]');
-    if (hcIframe) {
-      const m = (hcIframe.src || '').match(/hcaptcha\.com\/[^/]+\/([^/?#]+)/);
-      if (m) return JSON.stringify({found: true, type: 'hcaptcha', key: m[1]});
+    const hcFrames = document.querySelectorAll('iframe[src*="hcaptcha.com"]');
+    for (const f of hcFrames) {
+      // The real sitekey is exposed as a query param on the challenge iframe
+      // (`sitekey=...`); the checkbox-invisible iframe path only carries the
+      // bundle hash (`/captcha/v1/<hash>/`), which is NOT the site key.
+      const sm = (f.src || '').match(/[?&]sitekey=([^&]+)/);
+      if (sm) {
+        return JSON.stringify({
+          found: true,
+          type: 'hcaptcha',
+          key: decodeURIComponent(sm[1]),
+          isInvisible: (f.src || '').includes('size=invisible'),
+        });
+      }
     }
     // reCAPTCHA v2/v3: the g-recaptcha container or an anchor iframe.
     const rc = document.querySelector('.g-recaptcha[data-sitekey]');

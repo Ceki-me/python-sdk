@@ -242,6 +242,7 @@ class Browser:
             else:
                 # WS path (fallback — used before P2P connects, when forced off,
                 # or after a DC failure for this session)
+                fut._cdp_transport = 'ws'  # type: ignore[attr-defined]
                 await self._client._ws_send(
                     {
                         "type": "cdp",
@@ -1029,10 +1030,17 @@ class Browser:
             })
             website_url = loc.get("result", {}).get("value") or ""
 
+        extra: dict[str, Any] = {}
+        if detected.get("isInvisible"):
+            # Invisible hCaptcha: the solver must know, otherwise it waits for
+            # a checkbox the site never shows and times out.
+            extra["isInvisible"] = True
+
         result = await solver.solve(
             task_type=task_type,
             website_url=website_url,
             website_key=detected.get("key", ""),
+            extra=extra or None,
         )
         if not result.solved:
             return result

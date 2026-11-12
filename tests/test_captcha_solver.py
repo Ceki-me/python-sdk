@@ -318,3 +318,62 @@ async def test_solve_captcha_no_widget(mock_relay: MockRelayServer, monkeypatch)
         assert "no captcha widget" in result.error
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_solve_with_proxy_uses_proxied_task_type():
+    create_resp = _resp(json_body={"taskId": "77"})
+    ready_resp = _resp(json_body={
+        "status": "ready",
+        "solution": {"gRecaptchaResponse": "PX_T"},
+    })
+    http_mock = _mock_http(create_resp, ready_resp)
+
+    with patch("httpx.AsyncClient", return_value=http_mock) as cls:
+        solver = CaptchaSolver(
+            "key",
+            poll_timeout=5,
+            poll_interval=0.01,
+            proxy="http://user:secret@1.2.3.4:3128",
+        )
+        result = await solver.solve(
+            task_type="HCaptchaTaskProxyless",
+            website_url="https://chat.deepseek.com/sign_up",
+            website_key="site-key-abc",
+        )
+
+    assert result.solved is True
+    assert result.token == "PX_T"
+    # The proxied task type must be used, not Proxyless.
+    body = cls.return_value.post.call_args_list[0].kwargs["json"]
+    assert body["task"]["type"] == "HCaptchaTask"
+    # Proxy fields are split out of the URL for 2captcha.
+    task = body["task"]
+    assert task["proxyType"] == "http"
+    assert task["proxyAddress"] == "1.2.3.4"
+    assert task["proxyPort"] == 3128
+    assert task["proxyLogin"] == "user"
+    assert task["proxyPassword"] == "secret"
+    # No proxy string leaked as a whole URL.
+    assert "http://" not in task.get("proxy", "")
+
+
+@pytest.mark.asyncio
+async def test_proxy_from_env_selects_proxied_type(monkeypatch):
+    monkeypatch.setenv("CEKI_2CAPTCHA_PROXY_URL", "http://u:p@1.2.3.4:8080")
+    create_resp = _resp(json_body={"taskId": "88"})
+    ready_resp = _resp(json_body={"status": "ready", "solution": {"gRecaptchaResponse": "T"}})
+    http_mock = _mock_http(create_resp, ready_resp)
+
+    with patch("httpx.AsyncClient", return_value=http_mock) as cls:
+        solver = CaptchaSolver("key", poll_timeout=5, poll_interval=0.01)
+        result = await solver.solve(
+            task_type="RecaptchaV3TaskProxyless",
+            website_url="https://example.com",
+            website_key="k",
+        )
+
+    assert result.solved is True
+    body = cls.return_value.post.call_args_list[0].kwargs["json"]
+    assert body["task"]["type"] == "RecaptchaV3Task"
+    assert body["task"]["proxyPort"] == 8080
