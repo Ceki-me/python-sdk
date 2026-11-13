@@ -1,5 +1,6 @@
 from ._browser import Browser
 from ._captcha import CaptchaResult
+from ._captcha_solver import CaptchaSolver, SolvedCaptcha
 from ._client import Client
 from ._connect import ConnectOptions, connect
 from ._exceptions import (
@@ -73,4 +74,6 @@ __all__ = [
     "CaptchaResult",
     "CaptchaError",
     "CaptchaTimeoutError",
+    "SolvedCaptcha",
+    "CaptchaSolver",
 ]
