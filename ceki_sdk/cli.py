@@ -1642,6 +1642,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--limit", type=int, default=20, help="Max results")
     p_search.add_argument("--filter", action="append", help="Filter key=val (repeatable)")
 
+    sub.add_parser(
+        "mcp",
+        help="Start MCP stdio server (Claude Code, Cline, Cursor)",
+    )
+
     p_wait = sub.add_parser("wait", help="Wait until session ends")
     p_wait.add_argument("session_id", help="Session ID")
 
@@ -2050,6 +2055,11 @@ def main() -> None:
 
     if args.command == "provider":
         sys.exit(_cmd_provider(args))
+
+    if args.command == "mcp":
+        from .mcp_server import main as mcp_main
+        mcp_main()
+        return
 
     handler = handlers.get(args.command)
     if not handler:
