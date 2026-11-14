@@ -170,6 +170,16 @@ def test_normalize_profile_passes_through_per_origin_storage() -> None:
     assert env["sessionStorage"]["https://vc.ru"] == {"t": "y"}
 
 
+def test_normalize_profile_folds_empty_array_storage_from_get() -> None:
+    # The API returns empty localStorage/sessionStorage as [] on get. Such a
+    # get --output file must be saveable back, so [] folds into {}.
+    env = normalize_profile_for_vault(
+        {"fingerprint": None, "cookies": [], "localStorage": [], "sessionStorage": []}
+    )
+    assert env["localStorage"] == {}
+    assert env["sessionStorage"] == {}
+
+
 def test_minimal_vault_profile_passthrough_and_drop() -> None:
     prof = minimal_vault_profile(SAMPLE_VAULT_DATA)
     assert prof["cookies"] == [
