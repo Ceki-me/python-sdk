@@ -218,11 +218,14 @@ class Client:
         pacing_profile: str | None = None,
         vault: int | dict[str, Any] | None = None,
         subscription_id: int | None = None,
+        slot: int | None = None,
     ) -> Browser:
         if schedule_id is None and subscription_id is None:
             raise ValueError("rent requires schedule_id or subscription_id")
         if mode not in ("incognito", "main"):
             raise ValueError(f"mode must be 'incognito' or 'main', got {mode!r}")
+        if slot is not None and not (1 <= slot <= 64):
+            raise ValueError(f"slot must be in 1..64, got {slot!r}")
 
         # CloudBrowser subscription rent: the backend resolves the currently
         # free browser of the subscription's group and prices it at $0/min
@@ -244,6 +247,8 @@ class Client:
             msg["pacing_profile"] = pacing_profile
         if subscription_id is not None:
             msg["subscription_id"] = subscription_id
+        if slot is not None:
+            msg["slot"] = slot
         await self._ws_send(msg)
         try:
             match = await asyncio.wait_for(fut, timeout=90)

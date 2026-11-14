@@ -152,6 +152,7 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
         subscription_id = params.get("subscription_id")
         if not schedule and not subscription_id:
             raise ValueError("schedule (int) or subscription_id (int) required")
+        slot = params.get("slot")
         mode = params.get("mode", "incognito")
         vault_arg = params.get("vault")
         fp_data: bool | dict = True
@@ -180,7 +181,7 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
         try:
             browser = await client.rent(
                 schedule, mode=mode, fingerprint=fp_data, vault=vault_arg,
-                subscription_id=subscription_id,
+                subscription_id=subscription_id, slot=slot,
             )
         except (TimeoutError, ConnectionLost) as exc:
             # The shared WS is half-dead: the relay stopped routing rent/match
@@ -198,7 +199,7 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
             try:
                 browser = await client.rent(
                     schedule, mode=mode, fingerprint=fp_data, vault=vault_arg,
-                    subscription_id=subscription_id,
+                    subscription_id=subscription_id, slot=slot,
                 )
             except Exception:
                 await daemon._drop_client(api_key, client)
@@ -218,6 +219,7 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
             "chat_topic_id": browser.chat_topic_id,
             "schedule_id": browser.schedule_id,
             "subscription_id": subscription_id,
+            "slot": slot,
             "vault_session_id": getattr(browser, "_vault_session_id", None),
         }
 

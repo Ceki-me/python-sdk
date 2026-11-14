@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -326,3 +327,83 @@ async def test_rent_subscription_resolve_failure_raises() -> None:
             await client.rent(subscription_id=999)
 
     assert "not active" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_rent_forwards_slot_in_ws_message(mock_relay: MockRelayServer) -> None:
+    """rent(slot=3) must put slot into the WS rent message (ev 14954)."""
+    url = f"ws://127.0.0.1:{mock_relay.port}"
+    client = await connect("testkey", ConnectOptions(relay_url=url))
+
+    rent_task = asyncio.create_task(client.rent(schedule_id=240, slot=3))
+    await mock_relay.wait_for_message("rent")
+
+    rent_msgs = [m for m in mock_relay.received if m.get("type") == "rent"]
+    assert len(rent_msgs) == 1
+    assert rent_msgs[0]["browser_id"] == 240
+    assert rent_msgs[0]["slot"] == 3
+
+    await mock_relay.send_to_all(
+        {"type": "rent_pending", "event_id": "evt-slot", "schedule_id": 240})
+    await asyncio.sleep(0.05)
+    await mock_relay.send_to_all({
+        "type": "match",
+        "event_id": "evt-slot",
+        "session_id": "sess-slot",
+        "schedule_id": 240,
+        "capabilities": {},
+        "price_per_min": 0.01,
+    })
+    browser = await asyncio.wait_for(rent_task, timeout=5)
+    assert browser.session_id == "sess-slot"
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_rent_without_slot_omits_slot_key(mock_relay: MockRelayServer) -> None:
+    """No slot → rent message must NOT contain the slot key (backward compat)."""
+    url = f"ws://127.0.0.1:{mock_relay.port}"
+    client = await connect("testkey", ConnectOptions(relay_url=url))
+
+    rent_task = asyncio.create_task(client.rent(schedule_id=240))
+    await mock_relay.wait_for_message("rent")
+
+    rent_msgs = [m for m in mock_relay.received if m.get("type") == "rent"]
+    assert len(rent_msgs) == 1
+    assert "slot" not in rent_msgs[0]
+    assert set(rent_msgs[0].keys()) == {"type", "browser_id"}
+
+    await mock_relay.send_to_all(
+        {"type": "rent_pending", "event_id": "evt-noslot", "schedule_id": 240})
+    await asyncio.sleep(0.05)
+    await mock_relay.send_to_all({
+        "type": "match",
+        "event_id": "evt-noslot",
+        "session_id": "sess-noslot",
+        "schedule_id": 240,
+        "capabilities": {},
+        "price_per_min": 0.01,
+    })
+    browser = await asyncio.wait_for(rent_task, timeout=5)
+    assert browser.session_id == "sess-noslot"
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_rent_rejects_slot_out_of_range() -> None:
+    """slot outside 1..64 must raise ValueError before touching the relay."""
+    client = Client(
+        api_key="testkey",
+        relay_url="wss://relay.ceki.me/ws/agent",
+        api_url="https://api.ceki.me",
+        chat_url="https://chat.ceki.me/api/chat",
+        reconnect=False,
+    )
+    client._ws = AsyncMock()
+
+    with pytest.raises(ValueError):
+        await client.rent(schedule_id=240, slot=0)
+    with pytest.raises(ValueError):
+        await client.rent(schedule_id=240, slot=65)
