@@ -858,6 +858,18 @@ async def _cmd_vault(args: argparse.Namespace) -> None:
         else:
             raise CekiError("vault save needs <path> or --session <id>")
 
+        if args.meta is not None:
+            try:
+                meta = json.loads(args.meta)
+            except json.JSONDecodeError as e:
+                raise CekiError(f"--meta must be valid JSON object: {e}")
+            if not isinstance(meta, dict):
+                raise CekiError("--meta must be a JSON object")
+            if isinstance(envelope.get("meta"), dict):
+                envelope["meta"].update(meta)
+            else:
+                envelope["meta"] = meta
+
         if args.id is not None:
             session = await client.vault.update(int(args.id), envelope, label=label)
             _out({"ok": True, "id": session.id, "action": "updated", "label": label})
@@ -1606,6 +1618,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_vs.add_argument("--no-session-storage", action="store_true",
                       help="With --session: exclude sessionStorage from the snapshot")
     p_vs.add_argument("--label", help="Session label (default: basename of the file / snapshot)")
+    p_vs.add_argument("--meta", help="JSON object merged into data.meta (credentials, free-form)")
 
     p_va = vsub.add_parser(
         "apply",
