@@ -88,6 +88,12 @@ def normalize_profile_for_vault(profile: dict[str, Any]) -> dict[str, Any]:
         collected_at = datetime.now(timezone.utc).isoformat()
     envelope["collectedAt"] = collected_at
 
+    # Free-form credentials/notes attached by the caller (e.g. CLI --meta).
+    # Profile snapshots from profile.export() never carry it, so this is a
+    # no-op for live snapshots; only a re-uploaded envelope can pass it through.
+    if profile.get("meta") is not None:
+        envelope["meta"] = profile["meta"]
+
     return envelope
 
 
