@@ -285,6 +285,9 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
     subscription_arg: int | None = None
     if getattr(args, "subscription", None):
         subscription_arg = int(args.subscription)
+    slot_arg: int | None = None
+    if getattr(args, "slot", None):
+        slot_arg = int(args.slot)
     try:
         ok, result = await _daemon_request("/rent", {
             "schedule": args.schedule,
@@ -292,6 +295,7 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
             "fingerprint_from": fp_from,
             "vault": vault_arg,
             "subscription_id": subscription_arg,
+            "slot": slot_arg,
         })
         if ok:
             sid = result["session_id"]
@@ -317,7 +321,7 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
     try:
         browser = await client.rent(
             args.schedule, mode=args.mode, fingerprint=fp_data, vault=vault_arg,
-            subscription_id=subscription_arg,
+            subscription_id=subscription_arg, slot=slot_arg,
         )
         save_session(browser.session_id, {
             "session_id": browser.session_id,
@@ -330,6 +334,7 @@ async def _cmd_rent(args: argparse.Namespace) -> None:
             "chat_topic_id": browser.chat_topic_id,
             "schedule_id": browser.schedule_id,
             "subscription_id": subscription_arg,
+            "slot": slot_arg,
             "vault_session_id": getattr(browser, "_vault_session_id", None),
         })
     finally:
@@ -1507,6 +1512,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_rent.add_argument("--fingerprint-from", help="Path to profile JSON with fingerprint data")
     p_rent.add_argument("--vault", type=int, metavar="SESSION_ID",
                         help="Vault session id to restore (cookies+storage+fingerprint)")
+    p_rent.add_argument("--slot", type=int, metavar="SLOT",
+                        help="Multi-rent slot 1..64 — which parallel-session slot "
+                             "this rent targets (same browser+slot re-rents the "
+                             "same live session; different slots are distinct)")
 
     p_snap = sub.add_parser("snapshot", help="Take screenshot + get new chat messages")
     p_snap.add_argument("session_id", help="Session ID")
