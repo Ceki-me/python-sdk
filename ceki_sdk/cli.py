@@ -788,8 +788,12 @@ def _validate_vault_payload(data: dict[str, Any]) -> None:
     if "cookies" in data and not isinstance(data["cookies"], list):
         raise ValueError("vault profile 'cookies' must be an array")
     for key in ("localStorage", "sessionStorage"):
-        if key in data and not isinstance(data[key], dict):
-            raise ValueError(f"vault profile '{key}' must be an object")
+        if key in data:
+            val = data[key]
+            # The API returns empty storage as [] on get; treat it as a valid
+            # "no storage" marker. normalize_profile_for_vault folds it into {}.
+            if not (isinstance(val, dict) or isinstance(val, list)):
+                raise ValueError(f"vault profile '{key}' must be an object")
 
 
 async def _cmd_vault(args: argparse.Namespace) -> None:
