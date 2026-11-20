@@ -28,7 +28,7 @@ from ._exceptions import (
     RateLimitExceeded,
     SessionEnded,
 )
-from ._models import Match, Snapshot
+from ._models import Match, ProxyConfig, Snapshot
 
 log = logging.getLogger(__name__)
 
@@ -316,10 +316,22 @@ class Browser:
     async def switch_tab(self) -> None:
         await self._client._ws_send({"type": "switch_tab", "session_id": self.session_id})
 
-    async def configure(self, *, masking_mode: str | None = None, **kwargs: Any) -> None:
+    async def configure(
+        self,
+        *,
+        masking_mode: str | None = None,
+        proxy: ProxyConfig | dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
         payload: dict[str, Any] = {"type": "session.configure", "session_id": self.session_id}
         if masking_mode is not None:
             payload["masking_mode"] = masking_mode
+        # Route the rental through an outbound proxy (applied by the extension
+        # via chrome.proxy.settings, scoped to the incognito window). Set it
+        # BEFORE the first navigation — see ProxyConfig docs. None leaves the
+        # current route untouched (matches the JS SDK contract).
+        if proxy is not None:
+            payload["proxy"] = proxy.model_dump() if isinstance(proxy, ProxyConfig) else proxy
         payload.update(kwargs)
         await self._client._ws_send(payload)
 

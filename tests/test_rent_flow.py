@@ -407,3 +407,81 @@ async def test_rent_rejects_slot_out_of_range() -> None:
         await client.rent(schedule_id=240, slot=0)
     with pytest.raises(ValueError):
         await client.rent(schedule_id=240, slot=65)
+
+
+@pytest.mark.asyncio
+async def test_configure_proxy_sends_session_configure(mock_relay: MockRelayServer) -> None:
+    """configure(proxy=...) must emit session.configure with a proxy payload."""
+    url = f"ws://127.0.0.1:{mock_relay.port}"
+    client = await connect("testkey", ConnectOptions(relay_url=url))
+
+    rent_task = asyncio.create_task(client.rent(schedule_id=241, fingerprint=SAMPLE_FINGERPRINT))
+    await mock_relay.wait_for_message("rent")
+    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "px1", "schedule_id": 241})
+    await asyncio.sleep(0.05)
+    await mock_relay.send_to_all({
+        "type": "match",
+        "event_id": "px1",
+        "session_id": "px1",
+        "schedule_id": 241,
+        "capabilities": {},
+        "price_per_min": 0.01,
+    })
+
+    browser = await asyncio.wait_for(rent_task, timeout=5)
+    await asyncio.sleep(0.1)
+    # Clear the fingerprint configure emitted during rent.
+    mock_relay.received.clear()
+
+    from ceki_sdk import ProxyConfig
+    await browser.configure(proxy=ProxyConfig(scheme="http", host="10.0.0.1", port=3128, username="u", password="p"))
+    await asyncio.sleep(0.1)
+
+    cfg = [m for m in mock_relay.received if m.get("type") == "session.configure"]
+    assert len(cfg) == 1
+    assert cfg[0]["proxy"] == {
+        "scheme": "http",
+        "host": "10.0.0.1",
+        "port": 3128,
+        "username": "u",
+        "password": "p",
+    }
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_configure_proxy_dict_and_omit(mock_relay: MockRelayServer) -> None:
+    """A plain dict proxy is accepted, and omitting proxy sends no proxy key."""
+    url = f"ws://127.0.0.1:{mock_relay.port}"
+    client = await connect("testkey", ConnectOptions(relay_url=url))
+
+    rent_task = asyncio.create_task(client.rent(schedule_id=242, fingerprint=SAMPLE_FINGERPRINT))
+    await mock_relay.wait_for_message("rent")
+    await mock_relay.send_to_all({"type": "rent_pending", "event_id": "px2", "schedule_id": 242})
+    await asyncio.sleep(0.05)
+    await mock_relay.send_to_all({
+        "type": "match",
+        "event_id": "px2",
+        "session_id": "px2",
+        "schedule_id": 242,
+        "capabilities": {},
+        "price_per_min": 0.01,
+    })
+
+    browser = await asyncio.wait_for(rent_task, timeout=5)
+    await asyncio.sleep(0.1)
+    mock_relay.received.clear()
+
+    await browser.configure(proxy={"scheme": "socks5", "host": "1.2.3.4", "port": 1080})
+    await asyncio.sleep(0.1)
+    cfg = [m for m in mock_relay.received if m.get("type") == "session.configure"]
+    assert cfg and cfg[0]["proxy"] == {"scheme": "socks5", "host": "1.2.3.4", "port": 1080}
+
+    mock_relay.received.clear()
+    await browser.configure()
+    await asyncio.sleep(0.1)
+    cfg2 = [m for m in mock_relay.received if m.get("type") == "session.configure"]
+    assert cfg2 and "proxy" not in cfg2[0]
+
+    await client.close()
