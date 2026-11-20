@@ -6,6 +6,29 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ProxyConfig(BaseModel):
+    """Outbound proxy for a rental.
+
+    Applied by the extension through ``chrome.proxy.settings``, scoped to the
+    rental's incognito window — the provider's own traffic keeps its normal
+    route. Applied as a per-rent override that is restored when the session
+    ends, so it does not leak into the next rental.
+
+    Set it BEFORE the first navigation. The profile is warmed against one
+    egress IP: cookies and fingerprint are tied to it, and switching
+    mid-session makes the pair inconsistent, which is exactly what challenge
+    systems look for.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    scheme: Literal['http', 'https', 'socks5'] | None = None
+    host: str
+    port: int
+    username: str | None = None
+    password: str | None = None
+
+
 class BrowserOption(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
