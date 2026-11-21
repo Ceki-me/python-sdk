@@ -772,20 +772,22 @@ class Browser:
         if node_action == "fill":
             if node_value is None:
                 raise RuntimeError(f"act: fill[..] for node {node!r} requires a value (fill[N]:\"text\" or --value)")
+            # Native value setter: `Object.getOwnPropertyDescriptor(...).set.call()`
+            # throws "Illegal invocation" in modern Chromium (the value setter
+            # isn't on HTMLInputElement.prototype), so assign directly — works
+            # for <input> and <textarea> alike. Dispatch input/change so
+            # React/Vue/etc. hear it.
             js_expr = (
                 "(function(){"
                 "var el=document.querySelector(%s);"
                 "if(!el)return {ok:false,error:'no element'};"
                 "el.focus();"
-                "var setter=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value');"
-                "if(setter&&setter.set)setter.set.call(el,%s);"
-                "else el.value=%s;"
+                "el.value=%s;"
                 "el.dispatchEvent(new Event('input',{bubbles:true}));"
                 "el.dispatchEvent(new Event('change',{bubbles:true}));"
                 "return {ok:true,value:el.value};})()"
             ) % (
                 json.dumps(selector),
-                json.dumps(node_value),
                 json.dumps(node_value),
             )
         elif node_action in ("click", "js", "eval"):
