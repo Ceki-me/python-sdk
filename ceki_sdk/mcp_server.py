@@ -197,6 +197,29 @@ def build_server() -> FastMCP:
         }
 
     @mcp.tool()
+    async def browser_page(
+        viewport_only: bool = False,
+    ) -> dict[str, Any]:
+        """Return a token-lean interaction graph of the active page (zerodom).
+
+        Nodes come back as ``[NN] label`` in ``compact``, and each entry in
+        ``nodes`` carries a ``selector`` to use with ``browser_action``."""
+        browser = _require_browser()
+        return await browser.page(viewport_only=viewport_only)
+
+    @mcp.tool()
+    async def browser_action(
+        node: str,
+        value: str | None = None,
+    ) -> dict[str, Any]:
+        """Act on an interaction-graph node from ``browser_page``.
+
+        ``node`` is a handle like ``45``, ``click[45]`` or ``fill[45]``;
+        ``value`` is the text for fill actions. Returns the graph diff."""
+        browser = _require_browser()
+        return await browser.act(node, value)
+
+    @mcp.tool()
     async def browser_cdp(
         method: str,
         params: dict[str, Any] | None = None,

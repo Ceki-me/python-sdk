@@ -393,6 +393,58 @@ def _human_flag(args: argparse.Namespace) -> bool | None:
     return None
 
 
+async def _cmd_page(args: argparse.Namespace) -> None:
+    # Try daemon IPC
+    try:
+        ok, result = await _daemon_request("/page", {
+            "session_id": args.session_id,
+            "url": getattr(args, "url", None),
+            "viewport_only": getattr(args, "viewport_only", False),
+        })
+        if ok:
+            _out(result)
+            return
+    except CekiError as e:
+        _err(str(e), "daemon")
+        sys.exit(6)
+
+    # Fallback to one-shot
+    api_key = _get_api_key()
+    client, browser = await _resume_browser(api_key, args.session_id)
+    try:
+        result = await browser.page(url=getattr(args, "url", None))
+        _out(result)
+    finally:
+        if client._ws:
+            await client.disconnect()
+
+
+async def _cmd_action(args: argparse.Namespace) -> None:
+    # Try daemon IPC
+    try:
+        ok, result = await _daemon_request("/action", {
+            "session_id": args.session_id,
+            "node": args.node,
+            "value": getattr(args, "value", None),
+        })
+        if ok:
+            _out(result)
+            return
+    except CekiError as e:
+        _err(str(e), "daemon")
+        sys.exit(6)
+
+    # Fallback to one-shot
+    api_key = _get_api_key()
+    client, browser = await _resume_browser(api_key, args.session_id)
+    try:
+        result = await browser.act(args.node, getattr(args, "value", None))
+        _out(result)
+    finally:
+        if client._ws:
+            await client.disconnect()
+
+
 async def _cmd_navigate(args: argparse.Namespace) -> None:
     # Try daemon IPC
     try:
@@ -1531,6 +1583,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_nav.add_argument("--no-human", "--raw", action="store_true", dest="no_human",
                        help="Skip humanization for this call")
 
+    p_page = sub.add_parser("page", help="Interaction graph of the page (zerodom)")
+    p_page.add_argument("session_id", help="Session ID")
+    p_page.add_argument("--url", help="Override page URL in graph header")
+    p_page.add_argument("--viewport-only", action="store_true",
+                        help="Drop nodes outside the viewport")
+
+    p_action = sub.add_parser("action", help="Act on a graph node (click[NN] / fill[NN]:value)")
+    p_action.add_argument("session_id", help="Session ID")
+    p_action.add_argument("node", help="Node handle, e.g. 45, click[45], fill[45]")
+    p_action.add_argument("--value", help="Value for fill[..] actions")
+
     p_click = sub.add_parser("click", help="Click at coordinates")
     p_click.add_argument("session_id", help="Session ID")
     p_click.add_argument("x", type=int, help="X coordinate")
@@ -2047,6 +2110,8 @@ def main() -> None:
         "rent": _cmd_rent,
         "snapshot": _cmd_snapshot,
         "navigate": _cmd_navigate,
+        "page": _cmd_page,
+        "action": _cmd_action,
         "click": _cmd_click,
         "type": _cmd_type,
         "scroll": _cmd_scroll,

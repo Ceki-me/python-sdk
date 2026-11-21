@@ -31,6 +31,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5", "mypy>=1.10"]
+# Token-lean DOM→interaction-graph perception for agents (`ceki page` /
+# `ceki action`). Optional so the core SDK stays light.
+dom = ["zerodom>=0.1.5"]
 
 [project.urls]
 Homepage = "https://ceki.me"
