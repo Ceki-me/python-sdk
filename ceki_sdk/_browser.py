@@ -826,13 +826,27 @@ class Browser:
             raise RuntimeError(f"act: could not act on {node!r}: {result.get('error')}")
 
         # Diff: re-render the graph and compare node labels.
-        new_html = await self._outer_html(timeout=timeout)
-        try:
-            new_graph = _parse_html(new_html, url="about:blank")
-            new_compact = new_graph.to_compact_text()
-            diff = _diff_compact(graph.to_compact_text(), new_compact)
-        except Exception:  # pragma: no cover - diff is best-effort
-            diff = ""
+        # Click may have started a navigation — the first re-read can hit a
+        # transient empty document. Retry with a short settle pause; the diff
+        # itself is best-effort and must never fail the action.
+        new_html = ""
+        for _attempt in range(3):
+            if _attempt:
+                await asyncio.sleep(0.25)
+            try:
+                new_html = await self._outer_html(timeout=timeout)
+                if new_html:
+                    break
+            except Exception:  # pragma: no cover - retry on transient nav
+                continue
+        diff = ""
+        if new_html:
+            try:
+                new_graph = _parse_html(new_html, url="about:blank")
+                new_compact = new_graph.to_compact_text()
+                diff = _diff_compact(graph.to_compact_text(), new_compact)
+            except Exception:  # pragma: no cover - diff is best-effort
+                diff = ""
         return {
             "ok": True,
             "diff": diff,
