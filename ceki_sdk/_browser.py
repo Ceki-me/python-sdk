@@ -36,7 +36,8 @@ log = logging.getLogger(__name__)
 # Imported lazily so the rest of the SDK works without it; `page()`/`act()`
 # raise a clear error when it is missing.
 try:  # pragma: no cover - import guard
-    from zerodom.parser import parse_html as _parse_html, InteractionGraph  # type: ignore[no-redef]
+    from zerodom.parser import InteractionGraph  # type: ignore[no-redef]
+    from zerodom.parser import parse_html as _parse_html
     _ZERODOM_AVAILABLE = True
 except Exception:  # pragma: no cover - import guard
     _parse_html = None  # type: ignore[assignment]
@@ -760,7 +761,10 @@ class Browser:
             if digits:
                 idx_num = f"node_{int(digits):02d}"
 
-        target = next((n for n in raw_nodes if isinstance(n, dict) and n.get("id") == idx_num), None)
+        target = next(
+            (n for n in raw_nodes if isinstance(n, dict) and n.get("id") == idx_num),
+            None,
+        )
         if target is None:
             raise RuntimeError(f"act: unknown node {node!r} (no such node on page)")
 
@@ -771,7 +775,10 @@ class Browser:
 
         if node_action == "fill":
             if node_value is None:
-                raise RuntimeError(f"act: fill[..] for node {node!r} requires a value (fill[N]:\"text\" or --value)")
+                raise RuntimeError(
+                    f"act: fill[..] for node {node!r} requires a value"
+                    ' (fill[N]:"text" or --value)'
+                )
             # Native value setter: `Object.getOwnPropertyDescriptor(...).set.call()`
             # throws "Illegal invocation" in modern Chromium (the value setter
             # isn't on HTMLInputElement.prototype), so assign directly — works
@@ -823,7 +830,7 @@ class Browser:
         try:
             new_graph = _parse_html(new_html, url="about:blank")
             new_compact = new_graph.to_compact_text()
-            diff = _diff_compact(compact := graph.to_compact_text(), new_compact)
+            diff = _diff_compact(graph.to_compact_text(), new_compact)
         except Exception:  # pragma: no cover - diff is best-effort
             diff = ""
         return {
@@ -1499,8 +1506,8 @@ def _diff_compact(before: str, after: str) -> str:
     """
     import difflib
 
-    b_lines = [l for l in before.splitlines() if l.strip()]
-    a_lines = [l for l in after.splitlines() if l.strip()]
+    b_lines = [line for line in before.splitlines() if line.strip()]
+    a_lines = [line for line in after.splitlines() if line.strip()]
     diff = list(
         difflib.unified_diff(
             b_lines, a_lines, lineterm="", fromfile="before", tofile="after"

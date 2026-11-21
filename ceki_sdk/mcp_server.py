@@ -17,8 +17,8 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from ._client import Client
-from ._connect import ConnectOptions
 from ._config import default_api_url, default_chat_url, default_relay_url
+from ._connect import ConnectOptions
 
 # ──────────────────────────────────────────────────────────────────────────
 # Lazy session state — exactly ONE active browser per MCP server process.

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Tests for the zerodom-based interaction graph (`page()` / `act()`).
 
 These cover the pure parts (command parsing, compact diff, node extraction
@@ -7,11 +5,12 @@ from a zerodom graph) without any network or browser. The live-browser path
 is exercised in tests/e2e.
 """
 
+from __future__ import annotations
+
 import json
 
-import pytest
-
 from ceki_sdk._browser import _diff_compact, _graph_nodes
+
 
 # Minimal InteractionGraph-like object standing in for a parsed zerodom graph
 # (to_json() returns the node list; to_compact_text() the text).
