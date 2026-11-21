@@ -434,7 +434,11 @@ async def test_configure_proxy_sends_session_configure(mock_relay: MockRelayServ
     mock_relay.received.clear()
 
     from ceki_sdk import ProxyConfig
-    await browser.configure(proxy=ProxyConfig(scheme="http", host="10.0.0.1", port=3128, username="u", password="p"))
+    await browser.configure(
+        proxy=ProxyConfig(
+            scheme="http", host="10.0.0.1", port=3128, username="u", password="p"
+        )
+    )
     await asyncio.sleep(0.1)
 
     cfg = [m for m in mock_relay.received if m.get("type") == "session.configure"]

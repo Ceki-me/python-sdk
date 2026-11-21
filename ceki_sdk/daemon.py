@@ -286,6 +286,20 @@ class DaemonHTTPHandler(BaseHTTPRequestHandler):
             "ts": snap.ts.isoformat(),
         }
 
+    async def _handle_page(self, params: dict) -> dict:
+        browser = await self._resolve_browser(params)
+        url = params.get("url")
+        viewport_only = bool(params.get("viewport_only", False))
+        return await browser.page(url=url, viewport_only=viewport_only)
+
+    async def _handle_action(self, params: dict) -> dict:
+        browser = await self._resolve_browser(params)
+        node = params.get("node")
+        if not node:
+            raise ValueError("node required")
+        value = params.get("value")
+        return await browser.act(node, value)
+
     async def _handle_stop(self, params: dict) -> None:
         session_id = params.get("session_id", "")
         browser = self.server.daemon_server._sessions.pop(session_id, None)
@@ -414,6 +428,8 @@ _ENDPOINTS: dict[str, str] = {
     "/configure": "_handle_configure",
     "/screenshot": "_handle_screenshot",
     "/snapshot": "_handle_snapshot",
+    "/page": "_handle_page",
+    "/action": "_handle_action",
     "/stop": "_handle_stop",
     "/chat/send": "_handle_chat_send",
     "/chat/next": "_handle_chat_next",
