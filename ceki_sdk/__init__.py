@@ -37,7 +37,7 @@ from ._subscription import ClientSubscription
 from ._vault import BrowserVault, ClientVault, VaultSession
 from .humanize import HumanProfile
 
-__version__ = "2.38.0"
+__version__ = "2.40.1"
 __all__ = [
     "connect",
     "ConnectOptions",
