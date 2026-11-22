@@ -773,30 +773,26 @@ class Browser:
         if not selector:
             raise RuntimeError(f"act: node {node!r} has no CSS selector")
 
+        js_expr: str | None = None
+        skip_eval = False
         if node_action == "fill":
             if node_value is None:
                 raise RuntimeError(
                     f"act: fill[..] for node {node!r} requires a value"
                     ' (fill[N]:"text" or --value)'
                 )
-            # Native value setter: `Object.getOwnPropertyDescriptor(...).set.call()`
-            # throws "Illegal invocation" in modern Chromium (the value setter
-            # isn't on HTMLInputElement.prototype), so assign directly — works
-            # for <input> and <textarea> alike. Dispatch input/change so
-            # React/Vue/etc. hear it.
-            js_expr = (
-                "(function(){"
-                "var el=document.querySelector(%s);"
-                "if(!el)return {ok:false,error:'no element'};"
-                "el.focus();"
-                "el.value=%s;"
-                "el.dispatchEvent(new Event('input',{bubbles:true}));"
-                "el.dispatchEvent(new Event('change',{bubbles:true}));"
-                "return {ok:true,value:el.value};})()"
-            ) % (
-                json.dumps(selector),
-                json.dumps(node_value),
-            )
+            # Humanized fill: route through the extension's Ceki.typeText
+            # (real keydown/keypress/keyup with per-key human timing, and the
+            # long-text clipboard-paste branch for big inputs) instead of a
+            # bare el.value set — so `action fill[N]` carries the same
+            # anti-bot disguise as `ceki type`. The selector from the graph
+            # focuses the target element inside the extension.
+            try:
+                await self.type(node_value, selector=selector, human=True)
+                skip_eval = True
+            except Exception as exc:  # pragma: no cover - fallback to value set
+                log.warning("act: type() failed, falling back to value set: %s", exc)
+                js_expr = _fill_value_expr(selector, node_value)
         elif node_action in ("click", "js", "eval"):
             if node_action == "click":
                 js_expr = (
@@ -811,19 +807,20 @@ class Browser:
         else:
             raise RuntimeError(f"act: unsupported action {node_action!r}")
 
-        resp = await self.send(
-            {
-                "method": "Runtime.evaluate",
-                "params": {"expression": js_expr, "returnByValue": True},
-            },
-            timeout=timeout,
-        )
-        exc = (resp.get("exceptionDetails") or {}).get("exception")
-        if exc:
-            raise RuntimeError(f"act: JS error on {node!r}: {exc}")
-        result = (resp.get("result") or {}).get("value")
-        if isinstance(result, dict) and result.get("ok") is False:
-            raise RuntimeError(f"act: could not act on {node!r}: {result.get('error')}")
+        if not skip_eval and js_expr is not None:
+            resp = await self.send(
+                {
+                    "method": "Runtime.evaluate",
+                    "params": {"expression": js_expr, "returnByValue": True},
+                },
+                timeout=timeout,
+            )
+            exc = (resp.get("exceptionDetails") or {}).get("exception")
+            if exc:
+                raise RuntimeError(f"act: JS error on {node!r}: {exc}")
+            result = (resp.get("result") or {}).get("value")
+            if isinstance(result, dict) and result.get("ok") is False:
+                raise RuntimeError(f"act: could not act on {node!r}: {result.get('error')}")
 
         # Diff: re-render the graph and compare node labels.
         # Click may have started a navigation — the first re-read can hit a
@@ -1509,6 +1506,24 @@ def _graph_nodes(graph: "InteractionGraph") -> list[dict[str, Any]]:
     except Exception:  # pragma: no cover - defensive
         return []
     return []
+
+
+def _fill_value_expr(selector: str, value: str) -> str:
+    """JS to set a field value directly (fallback for `act` fill).
+
+    Assigns ``el.value`` directly (native setter throws "Illegal invocation"
+    in modern Chromium) and dispatches input/change so React/Vue hear it.
+    """
+    return (
+        "(function(){"
+        "var el=document.querySelector(%s);"
+        "if(!el)return {ok:false,error:'no element'};"
+        "el.focus();"
+        "el.value=%s;"
+        "el.dispatchEvent(new Event('input',{bubbles:true}));"
+        "el.dispatchEvent(new Event('change',{bubbles:true}));"
+        "return {ok:true,value:el.value};})()"
+    ) % (json.dumps(selector), json.dumps(value))
 
 
 def _diff_compact(before: str, after: str) -> str:
