@@ -1,6 +1,4 @@
 """MCP server tests — tool registration (no live browser needed)."""
-import asyncio
-
 import pytest
 
 from ceki_sdk.mcp_server import build_server
@@ -14,6 +12,8 @@ EXPECTED_TOOLS = {
     "browser_scroll",
     "browser_screenshot",
     "browser_snapshot",
+    "browser_page",
+    "browser_action",
     "browser_cdp",
     "browser_captcha",
     "browser_release",
@@ -21,7 +21,7 @@ EXPECTED_TOOLS = {
 
 
 @pytest.mark.asyncio
-async def test_registers_all_11_tools():
+async def test_registers_all_13_tools():
     mcp = build_server()
     tools = await mcp.list_tools()
     names = {t.name for t in tools}

@@ -17,8 +17,8 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from ._client import Client
-from ._connect import ConnectOptions
 from ._config import default_api_url, default_chat_url, default_relay_url
+from ._connect import ConnectOptions
 
 # ──────────────────────────────────────────────────────────────────────────
 # Lazy session state — exactly ONE active browser per MCP server process.
@@ -195,6 +195,29 @@ def build_server() -> FastMCP:
             "chat": [m.model_dump(mode="json") for m in snap.chat],
             "ts": snap.ts.isoformat(),
         }
+
+    @mcp.tool()
+    async def browser_page(
+        viewport_only: bool = False,
+    ) -> dict[str, Any]:
+        """Return a token-lean interaction graph of the active page (zerodom).
+
+        Nodes come back as ``[NN] label`` in ``compact``, and each entry in
+        ``nodes`` carries a ``selector`` to use with ``browser_action``."""
+        browser = _require_browser()
+        return await browser.page(viewport_only=viewport_only)
+
+    @mcp.tool()
+    async def browser_action(
+        node: str,
+        value: str | None = None,
+    ) -> dict[str, Any]:
+        """Act on an interaction-graph node from ``browser_page``.
+
+        ``node`` is a handle like ``45``, ``click[45]`` or ``fill[45]``;
+        ``value`` is the text for fill actions. Returns the graph diff."""
+        browser = _require_browser()
+        return await browser.act(node, value)
 
     @mcp.tool()
     async def browser_cdp(

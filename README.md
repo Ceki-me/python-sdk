@@ -240,7 +240,7 @@ for s in sessions:
 
 # Fetch one session with its decrypted profile envelope
 session = await client.vault.get(8)
-data = session.data          # {cookies, localStorage, sessionStorage, fingerprint, urls, collectedAt}
+data = session.data          # {cookies, localStorage, sessionStorage, fingerprint, urls, collectedAt, meta}
 ```
 
 **`browser.vault`** — snapshot save / restore from a rented browser:
@@ -374,6 +374,44 @@ ceki stop $SID
 
 The CLI persists session state locally — after `rent` it saves the session ID so subsequent commands resume it by SID without re-renting.
 
+### Token-lean page graph (`ceki page` / `ceki action`)
+
+For agent workflows, `snapshot` (a screenshot) is expensive to *read*: every
+page view costs a vision call. The SDK ships an optional **zerodom**-powered
+interaction graph — a deterministic, token-lean DOM→graph that lets the agent
+see interactive nodes (`[04] a 'Arts and Humanities'`) and act on them by
+number, without screenshots or OCR:
+
+```bash
+pip install 'ceki-sdk[dom]'
+
+ceki page $SID                  # → {nodes: [...], compact: "[01] a 'Home' …", tokens: N}
+ceki action $SID 'click[04]'    # click node 04 (CSS selector resolved internally)
+ceki action $SID 'fill[02]:crypto'  # type into node 02
+```
+
+`page` returns the graph as `compact` text plus each node's CSS `selector`/
+`action` for use with `action`. `action` re-renders the graph after the
+operation and returns a `+`/`-`/`~` diff of what changed — the agent sees the
+delta, not the whole page.
+
+Programmatic (Python):
+
+```python
+from ceki_sdk import connect
+
+client = await connect("ag_...")
+await client.rent(schedule_id=SCHEDULE)
+g = await browser.page()                 # interaction graph
+await browser.act("fill[02]:crypto")     # type into search
+await browser.act("click[03]")           # submit search
+diff = (await browser.act("click[04]")).get("diff")
+```
+
+The zerodom parser (`zerodom[>=0.1.5]`) is an **optional** dependency — the
+core SDK works without it; `page()`/`act()` raise a clear error until
+`pip install 'ceki-sdk[dom]'`.
+
 ### Commands
 
 #### Discovery and lifecycle
@@ -427,8 +465,8 @@ The CLI persists session state locally — after `rent` it saves the session ID 
 |---|---|
 | `vault list [--json] [--per-page N]` | List vault sessions (id, label, urls, updated) |
 | `vault get ID [--json] [-o FILE]` | Show a session; `--json` prints the decrypted profile, `-o` dumps it to a file |
-| `vault save FILE [--id ID] [--label L]` | Create (or PUT-update with `--id`) a session from a profile JSON |
-| `vault save --session SID [--id ID] [--label L] [--no-session-storage]` | Snapshot a live rental session into the vault |
+| `vault save FILE [--id ID] [--label L] [--meta '<JSON>']` | Create (or PUT-update with `--id`) a session from a profile JSON; `--meta` merges a JSON object into `data.meta` (free-form credentials/notes) |
+| `vault save --session SID [--id ID] [--label L] [--no-session-storage] [--meta '<JSON>']` | Snapshot a live rental session into the vault; `--meta` merges a JSON object into `data.meta` |
 | `vault apply ID --session SID` | Apply a vault profile into an existing rental (resume + restore) |
 | `vault apply ID --schedule N` | Rent a fresh browser with the vault profile restored |
 | `vault delete ID` | Delete a vault session |

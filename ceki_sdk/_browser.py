@@ -32,6 +32,18 @@ from ._models import Match, ProxyConfig, Snapshot
 
 log = logging.getLogger(__name__)
 
+# Optional dependency: zerodom's deterministic DOM→interaction-graph parser.
+# Imported lazily so the rest of the SDK works without it; `page()`/`act()`
+# raise a clear error when it is missing.
+try:  # pragma: no cover - import guard
+    from zerodom.parser import InteractionGraph  # type: ignore[no-redef]
+    from zerodom.parser import parse_html as _parse_html
+    _ZERODOM_AVAILABLE = True
+except Exception:  # pragma: no cover - import guard
+    _parse_html = None  # type: ignore[assignment]
+    InteractionGraph = None  # type: ignore[assignment,misc]
+    _ZERODOM_AVAILABLE = False
+
 mimetypes.init()
 for _ext, _mime in {".avif": "image/avif", ".webm": "video/webm", ".woff2": "font/woff2"}.items():
     if not mimetypes.guess_type(f"x{_ext}")[0]:
@@ -582,6 +594,265 @@ class Browser:
         if all_msgs:
             self._last_seen_ts = all_msgs[-1].created_at
         return Snapshot(screenshot=screenshot_b64, chat=all_msgs, ts=datetime.now(timezone.utc))
+
+    async def _outer_html(self, *, timeout: float = 30.0) -> str:
+        """Return the live page's ``document.documentElement.outerHTML``.
+
+        Runs as a bare ``Runtime.evaluate`` (no ``Runtime.enable``), same as
+        the rest of the SDK — we never raise the CDP Runtime domain, so bot
+        vendors fingerprinting the evaluate pattern stay none the wiser.
+        """
+        resp = await self.send(
+            {
+                "method": "Runtime.evaluate",
+                "params": {
+                    "expression": "document.documentElement.outerHTML",
+                    "returnByValue": True,
+                },
+            },
+            timeout=timeout,
+        )
+        value = (resp.get("result") or {}).get("value")
+        if not isinstance(value, str) or not value:
+            raise RuntimeError("page: Runtime.evaluate returned no outerHTML")
+        return value
+
+    async def page(
+        self,
+        *,
+        url: str | None = None,
+        viewport_only: bool = False,
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        """Return a token-lean interaction graph of the current page.
+
+        Uses zerodom's deterministic DOM parser: the raw ``outerHTML`` is
+        reduced to an ordered list of interactive nodes (``[01] a 'Home'``),
+        each of which maps 1:1 to a CSS selector usable with :meth:`act`.
+        Roughly 60-90% fewer tokens than the raw HTML (measure with ``tokens``
+        in the result).
+
+        Args:
+            url: Override the page URL in the graph header (auto-detected
+                from ``location.href`` when omitted).
+            viewport_only: Drop nodes outside the viewport when the browser
+                side stamped positions (zerodom serializer flag).
+            timeout: CDP timeout in seconds.
+
+        Returns:
+            ``{"ok": True, "nodes": [...], "compact": "...", "tokens": N,
+            "hidden_fields": [...], "url": "..."}``
+
+        Raises:
+            RuntimeError: If zerodom is not installed or the page has no HTML.
+        """
+        if not _ZERODOM_AVAILABLE:  # pragma: no cover - env dependent
+            raise RuntimeError(
+                "page() requires the optional dependency `zerodom`: "
+                "pip install zerodom"
+            )
+        html = await self._outer_html(timeout=timeout)
+        graph = _parse_html(html, url=url or "about:blank", viewport_only=viewport_only)
+        compact = graph.to_compact_text()
+
+        # Full node list + metadata come from to_json() in zerodom 0.1.5
+        # (ref_map() is just {id: selector}). Parse defensively so a schema
+        # drift in zerodom can't break the whole method.
+        nodes: list[dict[str, Any]] = []
+        meta: dict[str, Any] = {}
+        try:
+            import json as _json
+
+            payload = _json.loads(graph.to_json())
+            meta = (payload.get("metadata") or {}) if isinstance(payload, dict) else {}
+            raw_nodes = payload.get("nodes") or []
+            for n in raw_nodes:
+                if isinstance(n, dict) and n.get("id"):
+                    nodes.append(
+                        {
+                            "id": n["id"],
+                            "type": n.get("type"),
+                            "role": n.get("role"),
+                            "label": n.get("label"),
+                            "selector": n.get("selector"),
+                            "action": n.get("action"),
+                            "href": n.get("href"),
+                        }
+                    )
+        except Exception:  # pragma: no cover - defensive
+            nodes = []
+
+        try:
+            import tiktoken
+
+            tokens = len(tiktoken.get_encoding("cl100k_base").encode(compact))
+        except Exception:  # pragma: no cover - tiktoken optional
+            tokens = None
+
+        page_url = meta.get("url") or url or "about:blank"
+        return {
+            "ok": True,
+            "nodes": nodes,
+            "compact": compact,
+            "tokens": tokens,
+            "hidden_fields": getattr(graph, "hidden_fields", []),
+            "url": page_url,
+            "parsing_latency_ms": meta.get("parsing_latency_ms"),
+        }
+
+    async def act(
+        self,
+        node: str,
+        value: str | None = None,
+        *,
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        """Execute an action on an interaction-graph node.
+
+        ``node`` is the ``[NN]`` handle from :meth:`page` (e.g. ``"45"`` or
+        ``"click[45]"``) or a node id (``"node_45"``). The node's CSS selector
+        is resolved from the freshly parsed graph, then dispatched over CDP —
+        a click, a fill, or an arbitrary JS evaluate. Returns the diff of the
+        graph before/after, so the agent sees exactly what changed.
+
+        Args:
+            node: ``"45"``, ``"click[45]"``, ``"fill[45]"`` or ``"node_45"``.
+            value: For ``fill`` — the text to put in the field.
+            timeout: CDP timeout in seconds.
+
+        Returns:
+            ``{"ok": True, "diff": "…", "nodes": N, "url": "…"}``
+
+        Raises:
+            RuntimeError: If zerodom is missing, the node is unknown, or the
+                action failed.
+        """
+        if not _ZERODOM_AVAILABLE:  # pragma: no cover - env dependent
+            raise RuntimeError(
+                "act() requires the optional dependency `zerodom`: "
+                "pip install zerodom"
+            )
+
+        # Parse the action + node handle:
+        #   "click[45]" | "fill[45]" | "fill[45]:text" | "45" | "node_45"
+        action: str | None = None
+        node_value = value
+        if "[" in node:
+            action, _, rest = node.partition("[")
+            # rest is "45]" | "45]:text" — split the trailing ']' first.
+            handle, sep, inline_value = rest.partition("]")
+            handle = handle.strip() or rest
+            if sep and inline_value:
+                if node_value is None:
+                    node_value = inline_value[1:] if inline_value.startswith(":") else inline_value
+            nodes_handle = handle
+        else:
+            nodes_handle = node
+
+        html = await self._outer_html(timeout=timeout)
+        graph = _parse_html(html, url="about:blank")
+        raw_nodes = _graph_nodes(graph)
+
+        idx_num = None
+        if nodes_handle.startswith("node_"):
+            idx_num = nodes_handle
+        else:
+            digits = "".join(ch for ch in nodes_handle if ch.isdigit())
+            if digits:
+                idx_num = f"node_{int(digits):02d}"
+
+        target = next(
+            (n for n in raw_nodes if isinstance(n, dict) and n.get("id") == idx_num),
+            None,
+        )
+        if target is None:
+            raise RuntimeError(f"act: unknown node {node!r} (no such node on page)")
+
+        selector = target.get("selector")
+        node_action = action or target.get("action") or "click"
+        if not selector:
+            raise RuntimeError(f"act: node {node!r} has no CSS selector")
+
+        if node_action == "fill":
+            if node_value is None:
+                raise RuntimeError(
+                    f"act: fill[..] for node {node!r} requires a value"
+                    ' (fill[N]:"text" or --value)'
+                )
+            # Native value setter: `Object.getOwnPropertyDescriptor(...).set.call()`
+            # throws "Illegal invocation" in modern Chromium (the value setter
+            # isn't on HTMLInputElement.prototype), so assign directly — works
+            # for <input> and <textarea> alike. Dispatch input/change so
+            # React/Vue/etc. hear it.
+            js_expr = (
+                "(function(){"
+                "var el=document.querySelector(%s);"
+                "if(!el)return {ok:false,error:'no element'};"
+                "el.focus();"
+                "el.value=%s;"
+                "el.dispatchEvent(new Event('input',{bubbles:true}));"
+                "el.dispatchEvent(new Event('change',{bubbles:true}));"
+                "return {ok:true,value:el.value};})()"
+            ) % (
+                json.dumps(selector),
+                json.dumps(node_value),
+            )
+        elif node_action in ("click", "js", "eval"):
+            if node_action == "click":
+                js_expr = (
+                    "(function(){var el=document.querySelector(%s);"
+                    "if(!el)return {ok:false,error:'no element'};"
+                    "el.scrollIntoView({block:'center'});"
+                    "el.click();"
+                    "return {ok:true};})()"
+                ) % json.dumps(selector)
+            else:
+                js_expr = value or ""
+        else:
+            raise RuntimeError(f"act: unsupported action {node_action!r}")
+
+        resp = await self.send(
+            {
+                "method": "Runtime.evaluate",
+                "params": {"expression": js_expr, "returnByValue": True},
+            },
+            timeout=timeout,
+        )
+        exc = (resp.get("exceptionDetails") or {}).get("exception")
+        if exc:
+            raise RuntimeError(f"act: JS error on {node!r}: {exc}")
+        result = (resp.get("result") or {}).get("value")
+        if isinstance(result, dict) and result.get("ok") is False:
+            raise RuntimeError(f"act: could not act on {node!r}: {result.get('error')}")
+
+        # Diff: re-render the graph and compare node labels.
+        # Click may have started a navigation — the first re-read can hit a
+        # transient empty document. Retry with a short settle pause; the diff
+        # itself is best-effort and must never fail the action.
+        new_html = ""
+        for _attempt in range(3):
+            if _attempt:
+                await asyncio.sleep(0.25)
+            try:
+                new_html = await self._outer_html(timeout=timeout)
+                if new_html:
+                    break
+            except Exception:  # pragma: no cover - retry on transient nav
+                continue
+        diff = ""
+        if new_html:
+            try:
+                new_graph = _parse_html(new_html, url="about:blank")
+                new_compact = new_graph.to_compact_text()
+                diff = _diff_compact(graph.to_compact_text(), new_compact)
+            except Exception:  # pragma: no cover - diff is best-effort
+                diff = ""
+        return {
+            "ok": True,
+            "diff": diff,
+            "nodes": len(raw_nodes),
+            "url": await _current_location(self, timeout),
+        }
 
     @staticmethod
     def _detect_mime(filename: str) -> str:
@@ -1220,3 +1491,63 @@ class Browser:
         self._pending_cdp.clear()
         self._ended.set()
         self._client._active_browsers.pop(self.session_id, None)
+
+
+def _graph_nodes(graph: "InteractionGraph") -> list[dict[str, Any]]:
+    """Extract the ordered node list from a zerodom graph.
+
+    In zerodom 0.1.5 the full node list (id/type/label/selector/action) lives
+    in ``to_json()`` — ``ref_map()`` only returns ``{id: selector}``. Parsed
+    defensively so a schema drift degrades to an empty list, not a crash.
+    """
+    import json as _json
+
+    try:
+        payload = _json.loads(graph.to_json())
+        if isinstance(payload, dict):
+            return payload.get("nodes") or []
+    except Exception:  # pragma: no cover - defensive
+        return []
+    return []
+
+
+def _diff_compact(before: str, after: str) -> str:
+    """Best-effort line diff of two compact graph texts.
+
+    Produces a compact ``+``/``-``/``~`` summary of what changed, mirroring
+    zerodom's own action-diff philosophy: tell the agent what moved, not the
+    whole page again. Pure string diff — no DOM needed.
+    """
+    import difflib
+
+    b_lines = [line for line in before.splitlines() if line.strip()]
+    a_lines = [line for line in after.splitlines() if line.strip()]
+    diff = list(
+        difflib.unified_diff(
+            b_lines, a_lines, lineterm="", fromfile="before", tofile="after"
+        )
+    )
+    # Drop the header lines; keep only +/-/~ hunks.
+    body = [d for d in diff if d[:1] in ("+", "-", "~", "@")]
+    if not body:
+        return ""
+    return "\n".join(body)
+
+
+async def _current_location(browser: "Browser", timeout: float = 30.0) -> str:
+    """Return ``location.href`` for the given browser session."""
+    try:
+        resp = await browser.send(
+            {
+                "method": "Runtime.evaluate",
+                "params": {
+                    "expression": "location.href",
+                    "returnByValue": True,
+                },
+            },
+            timeout=timeout,
+        )
+        value = (resp.get("result") or {}).get("value")
+        return value if isinstance(value, str) else ""
+    except Exception:  # pragma: no cover - best-effort
+        return ""
