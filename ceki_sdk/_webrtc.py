@@ -525,6 +525,22 @@ class WebRTCTransport:
             raise ImportError("aiortc is required for P2P WebRTC transport")
 
         pc = await self._ensure_pc()
+
+        # Cold-start retry race guard (parity with js-sdk): _init_p2p rebuilds
+        # the transport (fresh pc) on a retry cadence and re-issues the offer
+        # until the DC opens. A late webrtc.answer from the *previous* offer
+        # can land on the *new* pc after it already completed the exchange
+        # (signalingState == "stable"). Setting an answer then throws
+        # InvalidStateError "Called in wrong state: stable". Ignore stale
+        # answers — the current offer is still waiting on its own.
+        try:
+            state = pc.signalingState
+        except Exception:
+            state = None
+        if type == "answer" and state == "stable":
+            log.warning("webrtc: stale answer ignored (signalingState=stable)")
+            return
+
         remote_desc = RTCSessionDescription(sdp=sdp, type=type)
         await pc.setRemoteDescription(remote_desc)
 
